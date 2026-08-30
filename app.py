@@ -1,16 +1,24 @@
 """
-SatQuery AI — Streamlit Application.
+SatQuery AI — Unified Agentic Remote-Sensing Assistant.
 
-A multimodal remote-sensing assistant that analyzes satellite imagery
-using spectral indices and change-detection tools.
+Streamlit application providing a single multimodal interface:
+- Multi-sensor image loading (RGB, Multispectral GeoTIFF)
+- Single-agent natural language understanding
+- LLM structured query planning & multi-tool orchestration
+- Remote GeoChat-7B GPU inference for visual reasoning
+- Authoritative remote-sensing indices (NDVI, NDWI, NDBI) and change detection
+- Transparent execution trace ("How the agent solved this")
 """
 
 import logging
 import time
-
 import streamlit as st
 
 from agent.controller import process_query
+from core.models import SessionContext
+from core.registry import get_registry
+from llm.client import get_llm_client
+from vlm.client import get_vlm
 
 # Configure logging
 logging.basicConfig(
@@ -19,14 +27,60 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-st.set_page_config(page_title="SatQuery AI", page_icon="🛰️", layout="wide")
+st.set_page_config(
+    page_title="SatQuery AI — Multimodal Remote-Sensing Assistant",
+    page_icon="🛰️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# Initialize Session Context in Streamlit state
+if "session_context" not in st.session_state:
+    st.session_state.session_context = SessionContext()
+if "last_result" not in st.session_state:
+    st.session_state.last_result = None
+
+# ── Sidebar: System Status & Capabilities ────────────────────────────
+with st.sidebar:
+    st.title("🛰️ SatQuery AI")
+    st.markdown("**Single Agentic Multimodal Assistant**")
+    st.markdown("---")
+
+    st.markdown("### 🔌 System Readiness")
+
+    # LLM Status
+    llm = get_llm_client()
+    if llm.is_available:
+        st.success(f"🟢 **LLM Planner:** Active ({llm.provider.model})")
+    else:
+        st.info("🟡 **LLM Planner:** Offline (Rule-based fallback)")
+
+    # GeoChat GPU Status
+    vlm = get_vlm()
+    if vlm.is_available():
+        st.success("🟢 **GeoChat-7B GPU:** Connected")
+    else:
+        st.info("⚪ **GeoChat-7B GPU:** Standby / Offline")
+
+    st.markdown("---")
+    st.markdown("### 🛠️ Active Capabilities")
+    reg = get_registry()
+    for cap in reg.list_available():
+        st.markdown(f"- **{cap.name.upper()}**: {cap.description[:45]}...")
+
+    st.markdown("---")
+    if st.button("🧹 Clear Conversation History", use_container_width=True):
+        st.session_state.session_context = SessionContext()
+        st.session_state.last_result = None
+        st.rerun()
 
 # ── Header ──────────────────────────────────────────────────────────
 st.title("🛰️ SatQuery AI")
 st.subheader("Multimodal Remote-Sensing Assistant")
 st.markdown(
-    "Analyze satellite imagery using spectral indices "
-    "(NDVI, NDWI, NDBI), change detection, and visual heuristics."
+    "Upload satellite or aerial imagery and ask any question in natural language. "
+    "The unified agent automatically selects authoritative spectral indices (NDVI, NDWI, NDBI), "
+    "change detection algorithms, and remote GPU vision models (GeoChat-7B) to provide a grounded analysis."
 )
 st.markdown("---")
 
@@ -39,7 +93,7 @@ with col1:
         "Upload Optical / Multispectral Image",
         type=["tif", "tiff", "png", "jpg", "jpeg"],
         key="img1",
-        help="Accepts RGB images (PNG, JPEG) and multispectral GeoTIFFs.",
+        help="Accepts standard RGB images (PNG, JPEG) and multispectral GeoTIFFs.",
     )
     if image1_file:
         st.image(image1_file, caption="Primary Image", use_container_width=True)
@@ -50,7 +104,7 @@ with col2:
         "Upload second image for change detection",
         type=["tif", "tiff", "png", "jpg", "jpeg"],
         key="img2",
-        help="Required for change detection. Upload a second image of the same area.",
+        help="Upload a second image of the same area to run temporal change detection.",
     )
     if image2_file:
         st.image(image2_file, caption="Secondary Image", use_container_width=True)
@@ -58,48 +112,43 @@ with col2:
 st.markdown("---")
 
 # ── Query Section ───────────────────────────────────────────────────
-st.markdown("### 💬 Ask your question")
+st.markdown("### 💬 Ask the Agent")
 query = st.text_input(
     "Enter your query about the satellite image(s):",
-    placeholder="e.g., Find water bodies, Detect vegetation, Compare these images",
+    placeholder="e.g., Find water bodies and vegetation, Describe the landscape, Compare these images",
 )
 
-# Example queries
-with st.expander("📝 Example queries"):
+# Example queries expander
+with st.expander("💡 Example Queries"):
     st.markdown(
         """
-        **Single image:**
-        - "Find water bodies in this image"
-        - "Detect vegetation areas"
-        - "Show built-up areas"
-        - "Calculate NDVI"
-        - "Describe this image"
-
-        **Two images:**
-        - "Detect changes between the two images"
-        - "Compare these images"
-
-        **Unsupported (will be flagged):**
-        - "Predict next year's crop yield"
-        - "Identify specific buildings"
+        * **Single Image Analysis:**
+          - *"Find water bodies in this scene"*
+          - *"Detect vegetation and compute NDVI"*
+          - *"Show built-up areas and structures"*
+          - *"Describe what you see in this satellite image"*
+          - *"Find water and vegetation and explain the scene"*
+        * **Dual Image Comparison:**
+          - *"Compare these two images and highlight changes"*
+          - *"Detect land-cover changes between before and after"*
+        * **Conversational Follow-up:**
+          - *"What about the vegetation coverage?"*
         """
     )
 
-# ── Analyze Button ──────────────────────────────────────────────────
-if st.button("🔍 Analyze", type="primary"):
+# ── Analyze Button & Pipeline ───────────────────────────────────────
+if st.button("🔍 Analyze with Agent", type="primary", use_container_width=True):
     if not image1_file:
-        st.error("⚠️ Please upload at least a Primary Image before submitting.")
+        st.error("⚠️ Please upload at least a Primary Image before running analysis.")
     elif not query.strip():
-        st.error("⚠️ Please enter a question about the image(s).")
+        st.error("⚠️ Please enter a question or instruction for the agent.")
     else:
-        with st.spinner("🔄 Analyzing image(s)..."):
-            # Read raw bytes
+        with st.spinner("🤖 Agent analyzing query, planning tools, and executing models..."):
             img1_bytes = image1_file.read()
             img2_bytes = image2_file.read() if image2_file else None
             fname1 = image1_file.name
             fname2 = image2_file.name if image2_file else ""
 
-            # Execute analysis
             t_start = time.time()
             result = process_query(
                 query=query,
@@ -107,74 +156,89 @@ if st.button("🔍 Analyze", type="primary"):
                 image2_bytes=img2_bytes,
                 filename1=fname1,
                 filename2=fname2,
+                session_context=st.session_state.session_context,
             )
             elapsed = time.time() - t_start
+            st.session_state.last_result = result
 
-        # ── Results ─────────────────────────────────────────────────
-        st.markdown("---")
-        st.markdown("## 📊 Analysis Results")
+# ── Render Results ──────────────────────────────────────────────────
+if st.session_state.last_result is not None:
+    result = st.session_state.last_result
+    st.markdown("---")
+    st.markdown("## 📊 Analysis Results")
 
-        # Answer
-        st.markdown("### 💡 Answer")
-        if result.answer.startswith("⚠️") or result.answer.startswith("❌"):
-            st.warning(result.answer)
-        else:
-            st.success(result.answer)
+    # Final Grounded Answer
+    st.markdown("### 💡 Agent Synthesis")
+    if result.answer.startswith("⚠️"):
+        st.warning(result.answer)
+    elif result.answer.startswith("❌"):
+        st.error(result.answer)
+    else:
+        st.success(result.answer)
 
-        # Evidence
-        if result.evidence is not None:
-            st.markdown("### 🗺️ Visual Evidence Map")
-            st.image(
-                result.evidence,
-                caption=f"Evidence — {result.tool_used}",
-                use_container_width=True,
-            )
+    # Visual Evidence Overlay Map
+    if result.evidence is not None:
+        st.markdown("### 🗺️ Visual Evidence Map")
+        st.image(
+            result.evidence,
+            caption=f"Evidence Map — {result.tool_used}",
+            use_container_width=True,
+        )
 
-        # Technical Details
-        with st.expander("🔧 Technical Details"):
-            detail_col1, detail_col2 = st.columns(2)
+    # ── Transparency: How the agent solved this ─────────────────────
+    if result.trace is not None and result.trace.steps:
+        with st.expander("🔍 How the agent solved this (Execution Trace)", expanded=True):
+            st.markdown(f"**Planner Backend:** `{result.trace.planner_type.upper()}`")
+            st.markdown(f"**Identified Intent:** `{result.trace.planned_intent}`")
+            st.markdown(f"**Plan Rationale:** {result.trace.plan_reasoning}")
+            st.markdown("#### Execution Steps:")
 
-            with detail_col1:
-                st.markdown("**Analysis Info**")
-                st.markdown(f"- **Tool used:** {result.tool_used}")
-                st.markdown(f"- **Processing time:** {elapsed:.3f}s")
-                if result.index_name:
-                    st.markdown(f"- **Index:** {result.index_name}")
-                if result.confidence is not None:
-                    st.markdown(f"- **Confidence:** {result.confidence:.2f}")
-                else:
-                    st.markdown("- **Confidence:** N/A (not applicable)")
-
-            with detail_col2:
-                st.markdown("**Image Info**")
-                meta = result.metadata
-                if "image1_dimensions" in meta:
-                    st.markdown(f"- **Primary image:** {meta['image1_dimensions']}")
-                if "image1_sensor_type" in meta:
-                    st.markdown(f"- **Sensor type:** {meta['image1_sensor_type']}")
-                if "image1_bands" in meta:
-                    bands_str = ", ".join(meta["image1_bands"])
-                    st.markdown(f"- **Bands:** {bands_str}")
-                if "image2_dimensions" in meta:
-                    st.markdown(f"- **Secondary image:** {meta['image2_dimensions']}")
-                if "coverage_percent" in meta:
-                    st.markdown(f"- **Coverage:** {meta['coverage_percent']}%")
-                if "changed_percent" in meta:
-                    st.markdown(f"- **Changed area:** {meta['changed_percent']}%")
-
-            if meta.get("requires_multispectral"):
-                st.info(
-                    "ℹ️ This analysis used an RGB color heuristic because the input "
-                    "image does not contain the spectral bands required for a true "
-                    "satellite index calculation. For accurate results, provide a "
-                    "multispectral GeoTIFF with the appropriate bands."
+            for step in result.trace.steps:
+                status_icon = "✅" if step.status == "success" else "⚠️" if step.status == "skipped" else "❌"
+                st.markdown(
+                    f"{status_icon} **Step {step.step_number}: {step.capability}** ({step.duration_seconds}s) — {step.description}"
                 )
+                if step.output_summary:
+                    st.caption(f"↳ {step.output_summary}")
+
+    # ── Technical Remote Sensing Details ────────────────────────────
+    with st.expander("🔧 Technical & Remote Sensing Metadata"):
+        dcol1, dcol2 = st.columns(2)
+
+        with dcol1:
+            st.markdown("**Analysis Information**")
+            st.markdown(f"- **Primary tool:** {result.tool_used}")
+            st.markdown(f"- **Total processing time:** {result.metadata.get('processing_time_seconds', 0.0):.3f}s")
+            if result.index_name:
+                st.markdown(f"- **Spectral index:** {result.index_name}")
+
+        with dcol2:
+            st.markdown("**Image Specifications**")
+            meta = result.metadata
+            if "image1_dimensions" in meta:
+                st.markdown(f"- **Primary image size:** {meta['image1_dimensions']}")
+            if "image1_sensor_type" in meta:
+                st.markdown(f"- **Sensor modality:** {meta['image1_sensor_type']}")
+            if "image1_bands" in meta:
+                st.markdown(f"- **Detected bands:** {', '.join(meta['image1_bands'])}")
+            if "coverage_percent" in meta:
+                st.markdown(f"- **Computed feature coverage:** {meta['coverage_percent']}%")
+            if "changed_percent" in meta:
+                st.markdown(f"- **Changed area:** {meta['changed_percent']}%")
+            if "alignment_method" in meta:
+                st.markdown(f"- **Pair alignment method:** {meta['alignment_method']}")
+
+        if result.metadata.get("requires_multispectral"):
+            st.info(
+                "ℹ️ **Scientific Note:** This analysis computed an RGB color heuristic because "
+                "the input file lacks multispectral bands (NIR/SWIR). For true spectral index calculations, "
+                "provide a multispectral GeoTIFF."
+            )
 
 # ── Footer ──────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown(
-    "<small>SatQuery AI — Remote Sensing Analysis Tool | "
-    "Spectral indices require appropriate satellite data (NIR, SWIR bands). "
-    "RGB inputs use visual heuristics only.</small>",
+    "<small>SatQuery AI — Single Agentic Multimodal Remote-Sensing Assistant | "
+    "Scientific calculations are authoritative. RGB inputs use visual proxies only.</small>",
     unsafe_allow_html=True,
 )

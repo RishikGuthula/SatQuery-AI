@@ -1,13 +1,13 @@
 """
 Change detection tool.
 
-Implements a baseline change-detection pipeline for two co-registered
+Implements a robust change-detection pipeline for two co-registered
 or auto-aligned images. Supports:
-  - Image compatibility validation
-  - Size normalization (resize to match)
-  - Difference map generation
-  - Change mask with adaptive thresholding
-  - Visual evidence and metrics
+  - Geospatial metadata alignment (when CRS/transform exist)
+  - Dimension normalization fallback
+  - Normalized color-space Euclidean difference mapping
+  - Adaptive percentile thresholding
+  - Visual evidence and grounded metrics
 """
 
 from __future__ import annotations
@@ -30,7 +30,6 @@ class ChangeDetectionError(Exception):
 def validate_pair(img_a: RasterImage, img_b: RasterImage) -> None:
     """
     Validate that two images are compatible for change detection.
-
     Raises ChangeDetectionError if incompatible.
     """
     if img_a.sensor_type == SensorType.SAR and img_b.sensor_type != SensorType.SAR:
@@ -45,6 +44,42 @@ def validate_pair(img_a: RasterImage, img_b: RasterImage) -> None:
         )
     if img_a.data.size == 0 or img_b.data.size == 0:
         raise ChangeDetectionError("One or both images are empty.")
+
+
+def _align_pair(img_a: RasterImage, img_b: RasterImage) -> tuple[np.ndarray, np.ndarray, str]:
+    """
+    Align two images using geospatial reprojection if rasterio/CRS is available,
+    otherwise resize to matching dimensions.
+    """
+    # Check for geospatial metadata
+    if img_a.crs and img_b.crs and img_a.transform and img_b.transform:
+        try:
+            import rasterio.warp
+            # If CRS or transforms differ, reproject b to match a
+            logger.info("Aligning images using geospatial reprojection.")
+            rgb_a = img_a.to_rgb().astype(np.float32)
+            rgb_b = img_b.to_rgb().astype(np.float32)
+
+            dest = np.zeros_like(rgb_a)
+            for c in range(3):
+                rasterio.warp.reproject(
+                    source=rgb_b[:, :, c],
+                    destination=dest[:, :, c],
+                    src_transform=img_b.transform,
+                    src_crs=img_b.crs,
+                    dst_transform=img_a.transform,
+                    dst_crs=img_a.crs,
+                    resampling=rasterio.warp.Resampling.bilinear,
+                )
+            return rgb_a, dest, "geospatial_reproject"
+        except Exception as e:
+            logger.debug(f"Geospatial reprojection fallback to resize: {e}")
+
+    # Fallback to dimension alignment
+    rgb_a = img_a.to_rgb().astype(np.float32)
+    rgb_b = img_b.to_rgb().astype(np.float32)
+    ra, rb = _resize_to_match(rgb_a, rgb_b)
+    return ra, rb, "bilinear_resize"
 
 
 def _resize_to_match(arr_a: np.ndarray, arr_b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -73,7 +108,7 @@ def _resize_to_match(arr_a: np.ndarray, arr_b: np.ndarray) -> tuple[np.ndarray, 
 
 def _normalize(arr: np.ndarray) -> np.ndarray:
     """Normalize array to [0, 1] range."""
-    amin, amax = float(arr.min()), float(arr.max())
+    amin, amax = float(np.nanmin(arr)), float(np.nanmax(arr))
     if amax - amin < 1e-8:
         return np.zeros_like(arr, dtype=np.float32)
     return ((arr - amin) / (amax - amin)).astype(np.float32)
@@ -86,42 +121,24 @@ def detect_changes(
 ) -> AnalysisResult:
     """
     Detect changes between two images.
-
-    Pipeline:
-        1. Validate compatibility
-        2. Align/resize if needed
-        3. Normalize both images
-        4. Compute absolute difference
-        5. Threshold to create change mask
-        6. Generate evidence and metrics
-
-    Args:
-        image_a: First (e.g., "before") image.
-        image_b: Second (e.g., "after") image.
-        threshold_percentile: Percentile of difference values used as threshold.
     """
     logger.info("Starting change detection pipeline.")
 
     # Step 1: Validate
     validate_pair(image_a, image_b)
 
-    # Step 2: Convert to comparable RGB arrays
-    rgb_a = image_a.to_rgb().astype(np.float32)
-    rgb_b = image_b.to_rgb().astype(np.float32)
+    # Step 2: Align images (geospatial or resize)
+    rgb_a, rgb_b, alignment_method = _align_pair(image_a, image_b)
 
-    # Step 3: Resize to match
-    rgb_a, rgb_b = _resize_to_match(rgb_a, rgb_b)
-
-    # Step 4: Normalize
+    # Step 3: Normalize
     norm_a = _normalize(rgb_a)
     norm_b = _normalize(rgb_b)
 
-    # Step 5: Compute difference map (per-pixel Euclidean distance in color space)
-    diff = np.sqrt(np.sum((norm_a - norm_b) ** 2, axis=-1))  # (H, W)
-    # Normalize to [0, 1]
+    # Step 4: Compute Euclidean difference in color space
+    diff = np.sqrt(np.sum((norm_a - norm_b) ** 2, axis=-1))
     diff = _normalize(diff)
 
-    # Step 6: Adaptive threshold using percentile
+    # Step 5: Adaptive threshold using percentile
     valid_diff = diff[~np.isnan(diff)]
     if len(valid_diff) == 0:
         raise ChangeDetectionError("Difference map is entirely NaN.")
@@ -129,24 +146,23 @@ def detect_changes(
     threshold = float(np.percentile(valid_diff, threshold_percentile))
     mask = (diff > threshold).astype(np.uint8) * 255
 
-    # Step 7: Metrics
+    # Step 6: Metrics
     total_pixels = mask.size
     changed_pixels = int(np.sum(mask > 0))
     changed_pct = (changed_pixels / total_pixels * 100) if total_pixels > 0 else 0.0
     mean_diff = float(np.nanmean(diff))
 
-    # Step 8: Evidence — show difference heatmap as overlay
-    # Create a heatmap-style evidence image
+    # Step 7: Visual evidence overlay
     evidence = _create_change_evidence(norm_a, diff, mask)
 
     answer = (
         f"Change detection between two images.\n\n"
-        f"Changed area: {changed_pct:.1f}% of image "
+        f"Detected changed area: {changed_pct:.1f}% of image "
         f"({changed_pixels:,} of {total_pixels:,} pixels).\n"
         f"Mean difference: {mean_diff:.4f}\n"
         f"Threshold (p{threshold_percentile:.0f}): {threshold:.4f}\n"
-        f"Method: Normalized color-space Euclidean distance with adaptive threshold.\n\n"
-        f"Red regions in the evidence map indicate detected changes."
+        f"Alignment method: {alignment_method}.\n\n"
+        f"Red regions in the visual evidence map highlight detected changes."
     )
 
     return AnalysisResult(
@@ -158,6 +174,7 @@ def detect_changes(
         tool_used="change_detection (pixel-difference)",
         metadata={
             "method": "color_euclidean_distance",
+            "alignment_method": alignment_method,
             "changed_pixels": changed_pixels,
             "total_pixels": total_pixels,
             "changed_percent": round(changed_pct, 2),
@@ -175,17 +192,11 @@ def _create_change_evidence(
     diff_map: np.ndarray,
     mask: np.ndarray,
 ) -> Image.Image:
-    """
-    Create a change-detection evidence image.
-
-    Shows the base image with changes highlighted in red.
-    """
-    h, w = mask.shape
+    """Create a change-detection evidence image."""
     base_uint8 = (base_rgb * 255).clip(0, 255).astype(np.uint8)
     if base_uint8.ndim == 2:
         base_uint8 = np.stack([base_uint8] * 3, axis=-1)
 
-    # Darken the base where no change, highlight changes in red
     overlay = base_uint8.copy()
     changed = mask > 0
 

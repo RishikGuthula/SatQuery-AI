@@ -120,8 +120,9 @@ class GeoChatVLM(VisionLanguageModel):
         }
         data = {
             "question": question_text,
-            "context": json.dumps(payload_context) if payload_context else "",
         }
+        if payload_context:
+            data["context"] = json.dumps(payload_context)
 
         # Retry loop with exponential backoff
         last_error = ""

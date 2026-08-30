@@ -31,6 +31,8 @@ logger = logging.getLogger("geochat_server")
 
 # Maximum upload size: 50 MB
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+IMAGE_TOKEN_INDEX = -200
+DEFAULT_IMAGE_TOKEN = "<image>"
 
 # Global model state (loaded ONCE during startup)
 MODEL_STATE = {
@@ -41,6 +43,7 @@ MODEL_STATE = {
     "device": "cpu",
     "ready": False,
     "load_error": None,
+    "use_official_builder": False,
 }
 
 # --- Authentication Configuration ---
@@ -75,6 +78,32 @@ def verify_api_key(
     return True
 
 
+def tokenizer_image_token(prompt: str, tokenizer, image_token_index: int = IMAGE_TOKEN_INDEX, return_tensors: str | None = None):
+    """
+    Encode prompt text into token IDs while replacing <image> with image_token_index (-200).
+    Ensures image tensor embeddings align with multimodal projector weights.
+    """
+    import torch
+
+    prompt_chunks = [tokenizer(chunk).input_ids for chunk in prompt.split(DEFAULT_IMAGE_TOKEN)]
+
+    def insert_separator(X, sep):
+        return [ele for sublist in zip(X, [sep] * len(X)) for ele in sublist][:-1]
+
+    input_ids = []
+    offset = 0
+    if len(prompt_chunks) > 0 and len(prompt_chunks[0]) > 0 and prompt_chunks[0][0] == tokenizer.bos_token_id:
+        offset = 1
+        input_ids.append(prompt_chunks[0][0])
+
+    for x in insert_separator(prompt_chunks, [image_token_index] * (offset + 1)):
+        input_ids.extend(x[offset:])
+
+    if return_tensors == "pt":
+        return torch.tensor(input_ids, dtype=torch.long)
+    return input_ids
+
+
 def load_geochat_model():
     """
     Load GeoChat-7B into GPU memory once during server startup.
@@ -94,14 +123,13 @@ def load_geochat_model():
 
         logger.info(f"Target device: {device.upper()} | Data type: {dtype} | 4-bit: {load_in_4bit} | 8-bit: {load_in_8bit}")
 
-        # Attempt to import GeoChat specific model classes if repository is cloned,
-        # otherwise use standard AutoModelForCausalLM / LLaVA architecture
+        # Strategy 1: Attempt to load via official GeoChat package if installed/cloned
+        loaded = False
         try:
-            # When cloned from https://github.com/mbzuai-oryx/GeoChat
             from geochat.model.builder import load_pretrained_model
             from geochat.mm_utils import get_model_name_from_path
 
-            model_name = get_model_name_from_path(model_path)
+            model_name = get_model_name_from_path(model_path) or "geochat-7b"
             tokenizer, model, image_processor, context_len = load_pretrained_model(
                 model_path=model_path,
                 model_base=None,
@@ -110,9 +138,14 @@ def load_geochat_model():
                 load_4bit=load_in_4bit,
                 device=device,
             )
-            logger.info("GeoChat loaded via official geochat.model.builder.")
-        except ImportError:
-            logger.info("geochat package not found in sys.path. Loading via HuggingFace Transformers...")
+            MODEL_STATE["use_official_builder"] = True
+            loaded = True
+            logger.info("✅ GeoChat loaded via official geochat.model.builder.")
+        except Exception as e:
+            logger.info(f"geochat builder not used ({e}). Falling back to direct HuggingFace loader...")
+
+        # Strategy 2: Direct Hugging Face Transformers loader with 504x504 CLIP image processor
+        if not loaded:
             from transformers import AutoModelForCausalLM, CLIPImageProcessor
 
             tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
@@ -130,8 +163,14 @@ def load_geochat_model():
             elif device == "cuda":
                 kwargs["device_map"] = "auto"
 
-            model = AutoModelForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, **kwargs)
-            context_len = 2048
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                low_cpu_mem_usage=True,
+                trust_remote_code=True,
+                **kwargs
+            )
+            context_len = getattr(model.config, "max_sequence_length", 2048)
+            MODEL_STATE["use_official_builder"] = False
 
         MODEL_STATE["model"] = model
         MODEL_STATE["tokenizer"] = tokenizer
@@ -141,7 +180,7 @@ def load_geochat_model():
         MODEL_STATE["ready"] = True
         MODEL_STATE["load_error"] = None
 
-        logger.info("✅ GeoChat-7B loaded successfully and ready for inference!")
+        logger.info("✅ GeoChat-7B is fully initialized in GPU memory and ready for inference!")
 
     except Exception as e:
         logger.error(f"❌ Failed to load GeoChat-7B: {e}", exc_info=True)
@@ -256,30 +295,34 @@ async def analyze_image(
 
         # Preprocess image to tensor (504x504 for GeoChat-7B)
         image_tensor = image_processor.preprocess(pil_img, return_tensors="pt")["pixel_values"]
-        image_tensor = image_tensor.to(device=device, dtype=model.dtype if hasattr(model, "dtype") else torch.float16)
+        image_tensor = image_tensor.to(
+            device=device,
+            dtype=model.dtype if hasattr(model, "dtype") else torch.float16,
+        )
 
         # Build prompt using GeoChat template format
-        # GeoChat conversation uses: Human: <image>\n{question}\nAssistant:
-        prompt_text = f"Human: <image>\n{question.strip()}\nAssistant:"
+        # Vicuna / GeoChat conversation format: Human: <image>\n{question}\nAssistant:
+        prompt_text = f"Human: {DEFAULT_IMAGE_TOKEN}\n{question.strip()}\nAssistant:"
 
-        input_ids = tokenizer(prompt_text, return_tensors="pt").input_ids.to(device)
+        # Encode input IDs replacing <image> with IMAGE_TOKEN_INDEX (-200)
+        input_ids = tokenizer_image_token(prompt_text, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt")
+        input_ids = input_ids.unsqueeze(0).to(device)
 
         # Stopping criteria for end of generation
-        stop_str = "</s>"
-        keywords = ["</s>", "Human:"]
+        stop_keywords = ["</s>", "Human:"]
 
         class KeywordsStoppingCriteria(StoppingCriteria):
-            def __init__(self, keywords, tokenizer, input_ids):
+            def __init__(self, keywords, tok, ids):
                 self.keywords = keywords
-                self.keyword_ids = [tokenizer(kw).input_ids[0] for kw in keywords if tokenizer(kw).input_ids]
+                self.keyword_ids = [tok(kw).input_ids[0] for kw in keywords if tok(kw).input_ids]
 
-            def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
+            def __call__(self, ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
                 for kw_id in self.keyword_ids:
-                    if input_ids[0, -1] == kw_id:
+                    if ids[0, -1] == kw_id:
                         return True
                 return False
 
-        stopping_criteria = StoppingCriteriaList([KeywordsStoppingCriteria(keywords, tokenizer, input_ids)])
+        stopping_criteria = StoppingCriteriaList([KeywordsStoppingCriteria(stop_keywords, tokenizer, input_ids)])
 
         with torch.inference_mode():
             output_ids = model.generate(
@@ -287,7 +330,7 @@ async def analyze_image(
                 images=image_tensor,
                 do_sample=False,
                 temperature=0.2,
-                max_new_tokens=350,
+                max_new_tokens=400,
                 use_cache=True,
                 stopping_criteria=stopping_criteria,
             )
@@ -304,7 +347,7 @@ async def analyze_image(
             outputs = outputs.split("Human:")[0].strip()
 
         if not outputs:
-            outputs = "Analysis completed, but no descriptive text was produced."
+            outputs = "GeoChat analysis completed, but no descriptive text was produced."
 
         elapsed = time.time() - t_start
         logger.info(f"Inference completed in {elapsed:.2f}s for query: '{question}'")

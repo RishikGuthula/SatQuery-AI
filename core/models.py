@@ -142,16 +142,3 @@ SENTINEL2_BAND_NAMES = {
     10: "swir1",    # B11
     11: "swir2",    # B12
 }
-
-LANDSAT_BAND_NAMES_OLI = {
-    0: "coastal",   # B1
-    1: "blue",      # B2
-    2: "green",     # B3
-    3: "red",       # B4
-    4: "nir",       # B5
-    5: "swir1",     # B6
-    6: "swir2",     # B7
-    7: "pan",       # B8
-    8: "cirrus1",   # B9
-    9: "cirrus2",   # B10
-}

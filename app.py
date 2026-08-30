@@ -5,15 +5,12 @@ A multimodal remote-sensing assistant that analyzes satellite imagery
 using spectral indices and change-detection tools.
 """
 
-import io
 import logging
 import time
 
 import streamlit as st
-from PIL import Image
 
 from agent.controller import process_query
-from core.image_loader import ImageLoadError
 
 # Configure logging
 logging.basicConfig(

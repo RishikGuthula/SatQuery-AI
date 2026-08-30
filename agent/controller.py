@@ -13,14 +13,11 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Sequence
 
-from PIL import Image
-
-from core.image_loader import RasterImage, load_from_bytes, load_from_pil_image, ImageLoadError
+from core.image_loader import RasterImage, load_from_bytes, ImageLoadError
 from core.models import AnalysisResult, Intent
 from core.planner import plan_query, PlanResult
-from tools.registry import SINGLE_IMAGE_TOOLS, DUAL_IMAGE_TOOLS
+from tools.registry import SINGLE_IMAGE_TOOLS
 from tools.change_detection import detect_changes, ChangeDetectionError
 from vlm.base import get_vlm
 

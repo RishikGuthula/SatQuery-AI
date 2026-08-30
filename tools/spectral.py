@@ -14,11 +14,10 @@ Formulas:
 from __future__ import annotations
 
 import logging
-from typing import Literal
 
 import numpy as np
 
-from core.models import RasterImage, SensorType
+from core.models import RasterImage
 
 logger = logging.getLogger(__name__)
 

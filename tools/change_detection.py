@@ -18,7 +18,6 @@ import numpy as np
 from PIL import Image
 
 from core.models import AnalysisResult, RasterImage, SensorType
-from evidence.engine import create_evidence_image
 
 logger = logging.getLogger(__name__)
 

@@ -10,9 +10,8 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-from PIL import Image
 
-from core.models import AnalysisResult, RasterImage, SensorType
+from core.models import AnalysisResult, RasterImage
 from tools.spectral import (
     can_compute_ndwi,
     calculate_ndwi,

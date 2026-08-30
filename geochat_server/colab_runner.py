@@ -29,7 +29,7 @@ def main():
     try:
         import torch
         if not torch.cuda.is_available():
-            print("⚠️ WARNING: CUDA GPU not detected! Inference will be slow.")
+            print("⚠️ WARNING: CUDA GPU not detected! Inference will run on CPU.")
         else:
             gpu_name = torch.cuda.get_device_name(0)
             vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
@@ -53,6 +53,10 @@ def main():
 
     # Step 3: Start FastAPI server in background
     print("⏳ Starting FastAPI server with GeoChat-7B in GPU memory...")
+    # Add root directory to python path
+    current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    server_env = {**os.environ, "PYTHONPATH": f"{current_dir}:{os.environ.get('PYTHONPATH', '')}"}
+
     server_cmd = [sys.executable, "-m", "uvicorn", "geochat_server.server:app", "--host", "0.0.0.0", "--port", "8000"]
     server_proc = subprocess.Popen(
         server_cmd,
@@ -60,6 +64,8 @@ def main():
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        env=server_env,
+        cwd=current_dir,
     )
 
     # Wait for server to load model and report ready
@@ -76,7 +82,7 @@ def main():
             pass
 
     if not ready:
-        print("⚠️ Server taking longer than expected. Continuing tunnel startup...")
+        print("⏳ Server is loading model weights. Launching tunnel...")
 
     # Step 4: Launch Cloudflare Tunnel
     print("🌐 Launching secure HTTPS tunnel...")
@@ -89,7 +95,7 @@ def main():
 
     public_url = None
     start_time = time.time()
-    while time.time() - start_time < 30:
+    while time.time() - start_time < 45:
         line = tunnel_proc.stdout.readline()
         if not line:
             break
@@ -100,15 +106,28 @@ def main():
 
     if not public_url:
         print("❌ Could not extract Cloudflare public tunnel URL.")
-        print("Check tunnel logs above.")
+        print("Check tunnel logs.")
         return
+
+    # Wait until model finishes loading if still in progress
+    if not ready:
+        print("⏳ Finalizing GeoChat-7B model initialization in GPU VRAM...")
+        for _ in range(60):
+            time.sleep(3)
+            try:
+                r = requests.get(f"{public_url}/health", headers={"X-API-Key": api_key}, timeout=5)
+                if r.status_code == 200 and r.json().get("ready"):
+                    ready = True
+                    print("✅ GeoChat-7B is fully initialized in GPU memory!")
+                    break
+            except Exception:
+                pass
 
     # Step 5: Self-test inference
     print("\n" + "=" * 65)
     print("🧪 Running automatic self-test inference on live GPU endpoint...")
     print("=" * 65)
     try:
-        # Create test image
         img = Image.new("RGB", (256, 256), color=(34, 139, 34))
         buf = io.BytesIO()
         img.save(buf, format="PNG")
@@ -117,7 +136,7 @@ def main():
         test_resp = requests.post(
             f"{public_url}/v1/analyze",
             files={"image": ("test.png", buf.getvalue(), "image/png")},
-            data={"question": "Describe what you see in this satellite image."},
+            data={"question": "Describe what you can see in this remote sensing image."},
             headers={"X-API-Key": api_key},
             timeout=120,
         )

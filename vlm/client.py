@@ -13,6 +13,24 @@ from vlm.geochat import GeoChatVLM
 logger = logging.getLogger(__name__)
 
 
+def _load_env_if_present():
+    """Load key-value pairs from .env file into os.environ if not already set."""
+    for env_path in (".env", "../.env", os.path.join(os.path.dirname(__file__), "..", ".env")):
+        if os.path.exists(env_path):
+            try:
+                with open(env_path, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            k, v = k.strip(), v.strip().strip('"').strip("'")
+                            if k and k not in os.environ:
+                                os.environ[k] = v
+                break
+            except Exception:
+                pass
+
+
 def get_vlm() -> VisionLanguageModel:
     """
     Instantiate the appropriate VLM client based on environment variables:
@@ -21,6 +39,7 @@ def get_vlm() -> VisionLanguageModel:
     - GEOCHAT_API_KEY: Authentication token
     - GEOCHAT_TIMEOUT: Timeout in seconds (default: 120)
     """
+    _load_env_if_present()
     enabled_str = os.environ.get("GEOCHAT_ENABLED", "true").strip().lower()
     is_enabled = enabled_str in ("true", "1", "yes")
 

@@ -50,16 +50,41 @@ class LLMClient:
             return None
 
 
+def _load_env_if_present():
+    """Load key-value pairs from .env file into os.environ if not already set."""
+    for env_path in (".env", "../.env", os.path.join(os.path.dirname(__file__), "..", ".env")):
+        if os.path.exists(env_path):
+            try:
+                with open(env_path, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            k, v = k.strip(), v.strip().strip('"').strip("'")
+                            if k and k not in os.environ:
+                                os.environ[k] = v
+                break
+            except Exception:
+                pass
+
+
 def get_llm_client() -> LLMClient:
     """
     Construct an LLMClient based on environment variables:
     LLM_PROVIDER ("openai", "gemini")
-    LLM_API_KEY
+    LLM_API_KEY (or GEMINI_API_KEY / GOOGLE_API_KEY)
     LLM_MODEL
     LLM_TIMEOUT
     """
+    _load_env_if_present()
+
     provider_name = os.environ.get("LLM_PROVIDER", "").strip().lower()
-    api_key = os.environ.get("LLM_API_KEY", "").strip()
+    api_key = (
+        os.environ.get("LLM_API_KEY", "").strip()
+        or os.environ.get("GEMINI_API_KEY", "").strip()
+        or os.environ.get("GOOGLE_API_KEY", "").strip()
+        or os.environ.get("OPENAI_API_KEY", "").strip()
+    )
     model = os.environ.get("LLM_MODEL", "").strip()
     timeout_str = os.environ.get("LLM_TIMEOUT", "60").strip()
 
@@ -83,11 +108,13 @@ def get_llm_client() -> LLMClient:
         logger.info("Auto-detected OpenAI API key format.")
         provider = OpenAIProvider(api_key=api_key, model=model or "gpt-4o-mini", timeout=timeout)
         return LLMClient(provider=provider)
-    elif api_key.startswith("AIza"):
+    elif api_key.startswith("AIza") or "gemini" in provider_name or "google" in provider_name:
         # Auto-detect Gemini key
         logger.info("Auto-detected Gemini API key format.")
         provider = GeminiProvider(api_key=api_key, model=model or "gemini-1.5-flash", timeout=timeout)
         return LLMClient(provider=provider)
 
-    logger.warning(f"Unrecognized LLM_PROVIDER: '{provider_name}'.")
-    return LLMClient(provider=None)
+    # If key exists but provider wasn't specified, try Gemini first (free tier / standard)
+    logger.info("Defaulting configured API key to Gemini provider.")
+    provider = GeminiProvider(api_key=api_key, model=model or "gemini-1.5-flash", timeout=timeout)
+    return LLMClient(provider=provider)

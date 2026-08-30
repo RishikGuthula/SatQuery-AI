@@ -1,0 +1,10 @@
+# SatQuery AI — Dependencies
+# Install with: pip install -r requirements.txt
+
+streamlit>=1.30.0,<2.0.0
+numpy>=1.24.0,<3.0.0
+Pillow>=10.0.0,<11.0.0
+rasterio>=1.3.0,<2.0.0
+
+# Development / testing
+pytest>=7.0.0,<9.0.0

@@ -144,9 +144,14 @@ class CapabilityRegistry:
 
 
 # Global registry singleton
-registry = CapabilityRegistry()
+_registry = CapabilityRegistry()
 
 
 def get_registry() -> CapabilityRegistry:
-    """Return the global capability registry singleton."""
-    return registry
+    """Return the global capability registry singleton, ensuring built-ins are registered."""
+    if not _registry._capabilities:
+        try:
+            import tools.registry  # noqa: F401
+        except Exception:
+            pass
+    return _registry

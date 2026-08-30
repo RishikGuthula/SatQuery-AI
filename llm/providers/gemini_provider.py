@@ -18,10 +18,10 @@ class GeminiProvider(LLMProvider):
     def __init__(
         self,
         api_key: str,
-        model: str = "gemini-1.5-flash",
+        model: str = "gemini-3.6-flash",
         timeout: int = 60,
     ):
-        super().__init__(api_key=api_key, model=model or "gemini-1.5-flash", timeout=timeout)
+        super().__init__(api_key=api_key, model=model or "gemini-3.6-flash", timeout=timeout)
 
     def is_available(self) -> bool:
         return bool(self.api_key and self.api_key.strip())
@@ -51,19 +51,21 @@ class GeminiProvider(LLMProvider):
             elif msg.role == "assistant":
                 contents.append({"role": "model", "parts": [{"text": msg.content}]})
 
+        generation_config: dict[str, Any] = {
+            "temperature": temperature,
+            "maxOutputTokens": max(max_tokens, 4096),
+        }
+
+        if response_format == "json":
+            generation_config["responseMimeType"] = "application/json"
+
         payload: dict = {
             "contents": contents,
-            "generationConfig": {
-                "temperature": temperature,
-                "maxOutputTokens": max_tokens,
-            },
+            "generationConfig": generation_config,
         }
 
         if system_instruction:
             payload["systemInstruction"] = system_instruction
-
-        if response_format == "json":
-            payload["generationConfig"]["responseMimeType"] = "application/json"
 
         try:
             resp = requests.post(url, json=payload, headers=headers, timeout=self.timeout)

@@ -101,7 +101,7 @@ def get_llm_client() -> LLMClient:
         provider = OpenAIProvider(api_key=api_key, model=model or "gpt-4o-mini", timeout=timeout)
         return LLMClient(provider=provider)
     elif provider_name in ("gemini", "google"):
-        provider = GeminiProvider(api_key=api_key, model=model or "gemini-1.5-flash", timeout=timeout)
+        provider = GeminiProvider(api_key=api_key, model=model or "gemini-3.6-flash", timeout=timeout)
         return LLMClient(provider=provider)
     elif api_key.startswith("sk-"):
         # Auto-detect OpenAI key
@@ -111,10 +111,10 @@ def get_llm_client() -> LLMClient:
     elif api_key.startswith("AIza") or "gemini" in provider_name or "google" in provider_name:
         # Auto-detect Gemini key
         logger.info("Auto-detected Gemini API key format.")
-        provider = GeminiProvider(api_key=api_key, model=model or "gemini-1.5-flash", timeout=timeout)
+        provider = GeminiProvider(api_key=api_key, model=model or "gemini-3.6-flash", timeout=timeout)
         return LLMClient(provider=provider)
 
     # If key exists but provider wasn't specified, try Gemini first (free tier / standard)
     logger.info("Defaulting configured API key to Gemini provider.")
-    provider = GeminiProvider(api_key=api_key, model=model or "gemini-1.5-flash", timeout=timeout)
+    provider = GeminiProvider(api_key=api_key, model=model or "gemini-3.6-flash", timeout=timeout)
     return LLMClient(provider=provider)

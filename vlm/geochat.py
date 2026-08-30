@@ -142,8 +142,16 @@ class GeoChatVLM(VisionLanguageModel):
 
                 if resp.status_code == 200:
                     res_json = resp.json()
-                    answer = res_json.get("answer", "").strip()
-                    if answer:
+                    raw_answer = res_json.get("answer", "").strip()
+                    if raw_answer:
+                        import re
+                        cleaned = re.sub(r'<\s*p\s*>\s*', '', raw_answer)
+                        cleaned = re.sub(r'<\s*/\s*p\s*>\s*', '', cleaned)
+                        cleaned = re.sub(r'\{\s*(?:<\s*\d+\s*>\s*)+\|\s*(?:<\s*\d+\s*>\s*)+\}', '', cleaned)
+                        cleaned = re.sub(r'\{\s*(?:<\s*\d+\s*>\s*)+\}', '', cleaned)
+                        cleaned = re.sub(r'\s+([,.:;?!])', r'\1', cleaned)
+                        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+                        answer = cleaned or raw_answer
                         logger.info(f"GeoChat inference succeeded in {elapsed:.2f}s.")
                         return answer
                     else:

@@ -44,13 +44,36 @@ def detect_builtup(image: RasterImage) -> AnalysisResult:
         method = "true_ndbi"
         answer_text = _format_builtup_answer(mask, image, method="NDBI")
         tool_name = "builtup_detection (NDBI)"
-    else:
+    elif image.has_band("red") and image.has_band("blue"):
+        # RGB proxy (only when required bands exist)
         index = rgb_urban_proxy(image)
         mask = create_mask(index, threshold=RGB_URBAN_THRESHOLD, above=True)
         index_name = "RGB Urban Proxy (heuristic — NOT NDBI)"
         method = "rgb_urban"
         answer_text = _format_builtup_answer(mask, image, method="RGB proxy")
         tool_name = "builtup_detection (RGB proxy)"
+    else:
+        # Missing bands — clear explanation (no crash)
+        available = ", ".join(image.bands) if image.bands else "none"
+        return AnalysisResult(
+            answer=(
+                "⚠️ Built-up area detection cannot be performed with the available data.\n\n"
+                f"**Available bands:** {available}\n\n"
+                "**True NDBI** requires SWIR (B11) and NIR (B08) bands.\n"
+                "**RGB urban proxy** requires Red and Blue bands.\n\n"
+                "Please upload the required spectral bands to perform built-up detection."
+            ),
+            evidence=None,
+            mask=None,
+            index_name=None,
+            confidence=None,
+            tool_used="builtup_detection (missing_bands)",
+            metadata={
+                "method": "missing_bands",
+                "available_bands": image.bands,
+                "error": "insufficient_spectral_bands",
+            },
+        )
 
     rgb = image.to_rgb()
     evidence = create_evidence_image(rgb, mask, color=(200, 50, 50), alpha=0.5)

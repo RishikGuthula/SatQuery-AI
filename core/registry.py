@@ -94,13 +94,24 @@ class FunctionCapability(Capability):
                     tool_used=f"{self.name} (blocked)",
                     metadata={"error": "missing_second_image"},
                 )
-            return self.fn(context.image1, context.image2)
+            try:
+                return self.fn(context.image1, context.image2, query=context.query)
+            except TypeError:
+                return self.fn(context.image1, context.image2)
+
         if context.image2 is not None:
             try:
-                return self.fn(context.image1, context.image2)
+                return self.fn(context.image1, context.image2, query=context.query)
             except TypeError:
-                return self.fn(context.image1)
-        return self.fn(context.image1)
+                try:
+                    return self.fn(context.image1, context.image2)
+                except TypeError:
+                    pass
+
+        try:
+            return self.fn(context.image1, query=context.query)
+        except TypeError:
+            return self.fn(context.image1)
 
 
 class CapabilityRegistry:

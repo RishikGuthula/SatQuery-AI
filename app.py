@@ -183,14 +183,23 @@ if st.button("🔍 Analyze with Agent", type="primary", use_container_width=True
             fname2 = image2_file.name if image2_file else ""
 
             t_start = time.time()
-            result = process_query(
-                query=query,
-                image1_bytes=img1_bytes,
-                image2_bytes=img2_bytes,
-                filename1=fname1,
-                filename2=fname2,
-                session_context=st.session_state.session_context,
-            )
+            try:
+                result = process_query(
+                    query=query,
+                    image1_bytes=img1_bytes,
+                    image2_bytes=img2_bytes,
+                    filename1=fname1,
+                    filename2=fname2,
+                    session_context=st.session_state.session_context,
+                )
+            except Exception as e:
+                logger.error(f"Unexpected error during analysis: {e}", exc_info=True)
+                result = AnalysisResult(
+                    answer=f"⚠️ Analysis could not be completed: {str(e)}",
+                    evidence=None,
+                    tool_used="error_handler",
+                    metadata={"error": str(e)},
+                )
             elapsed = time.time() - t_start
             st.session_state.last_result = result
 

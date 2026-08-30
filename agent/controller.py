@@ -316,7 +316,16 @@ def _execute_legacy_fallback(
     # Single-image tools
     if intent in SINGLE_IMAGE_TOOLS:
         tool_fn = SINGLE_IMAGE_TOOLS[intent]
-        return tool_fn(raster1)
+        try:
+            return tool_fn(raster1, raster2, query=plan.reasoning)
+        except TypeError:
+            try:
+                return tool_fn(raster1, raster2)
+            except TypeError:
+                try:
+                    return tool_fn(raster1, query=plan.reasoning)
+                except TypeError:
+                    return tool_fn(raster1)
 
     # Image description
     if intent == Intent.IMAGE_DESCRIPTION:

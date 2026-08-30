@@ -28,25 +28,47 @@ NDWI_WATER_THRESHOLD = 0.0
 RGB_WATER_THRESHOLD = 0.1
 
 
-def detect_water(image: RasterImage) -> AnalysisResult:
+def detect_water(image: RasterImage, image2: RasterImage | None = None) -> AnalysisResult:
     """
     Detect water bodies in the image.
 
-    For multispectral images with green + NIR bands:
+    For multispectral images with green + NIR bands (or separate B03/B08 GeoTIFF uploads):
         Uses true NDWI (McFeeters 1996).
     For RGB-only images:
         Uses a color-based water proxy (clearly labeled as heuristic).
     """
     logger.info(f"Water detection: sensor_type={image.sensor_type}, bands={image.bands}")
 
+    # Check single image with both Green and NIR
     if can_compute_ndwi(image):
-        # True NDWI
         index = calculate_ndwi(image)
         mask = create_mask(index, threshold=NDWI_WATER_THRESHOLD, above=True)
         index_name = "NDWI (McFeeters 1996)"
         method = "true_ndwi"
         answer_text = _format_water_answer(mask, image, method="NDWI")
         tool_name = "water_detection (NDWI)"
+    # Check separate GeoTIFF band uploads (e.g. B03.tif as image1 and B08.tif as image2)
+    elif image2 is not None and (
+        (image.has_band("green") and image2.has_band("nir"))
+        or (image.has_band("nir") and image2.has_band("green"))
+    ):
+        green_band = image.get_band("green") if image.has_band("green") else image2.get_band("green")
+        nir_band = image2.get_band("nir") if image2.has_band("nir") else image.get_band("nir")
+        if green_band is not None and nir_band is not None and green_band.shape == nir_band.shape:
+            from tools.spectral import _normalized_index
+            index = _normalized_index(green_band, nir_band, image.nodata)
+            mask = create_mask(index, threshold=NDWI_WATER_THRESHOLD, above=True)
+            index_name = "NDWI (McFeeters 1996 — Dual Band GeoTIFF)"
+            method = "true_ndwi"
+            answer_text = _format_water_answer(mask, image, method="NDWI")
+            tool_name = "water_detection (NDWI)"
+        else:
+            index = rgb_water_proxy(image)
+            mask = create_mask(index, threshold=RGB_WATER_THRESHOLD, above=True)
+            index_name = "RGB Water Proxy (heuristic — NOT NDWI)"
+            method = "rgb_water_proxy"
+            answer_text = _format_water_answer(mask, image, method="RGB water proxy")
+            tool_name = "water_detection (RGB proxy)"
     else:
         # RGB proxy
         index = rgb_water_proxy(image)

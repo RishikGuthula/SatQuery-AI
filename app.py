@@ -15,6 +15,7 @@ import time
 import streamlit as st
 
 from agent.controller import process_query
+from core.image_loader import load_from_bytes
 from core.models import SessionContext
 from core.registry import get_registry
 from llm.client import get_llm_client
@@ -26,6 +27,26 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def get_display_image(uploaded_file):
+    """
+    Safely convert an uploaded file (JPEG, PNG, or mode I / 16-bit float GeoTIFF)
+    to a 3-channel RGB uint8 PIL Image for Streamlit display only, preserving the
+    original raw bytes and file pointer position for scientific processing.
+    """
+    if uploaded_file is None:
+        return None
+    try:
+        uploaded_file.seek(0)
+        data = uploaded_file.read()
+        uploaded_file.seek(0)
+
+        raster = load_from_bytes(data, filename=uploaded_file.name)
+        return raster.to_pil()
+    except Exception as e:
+        logger.warning(f"Error preparing display image for {uploaded_file.name}: {e}")
+        return None
 
 st.set_page_config(
     page_title="SatQuery AI — Multimodal Remote-Sensing Assistant",
@@ -96,7 +117,11 @@ with col1:
         help="Accepts standard RGB images (PNG, JPEG) and multispectral GeoTIFFs.",
     )
     if image1_file:
-        st.image(image1_file, caption="Primary Image", use_container_width=True)
+        disp1 = get_display_image(image1_file)
+        if disp1 is not None:
+            st.image(disp1, caption=f"Primary Image: {image1_file.name}", use_container_width=True)
+        else:
+            st.info(f"📄 Loaded file: {image1_file.name}")
 
 with col2:
     st.markdown("### 📷 Secondary Image (optional)")
@@ -107,7 +132,11 @@ with col2:
         help="Upload a second image of the same area to run temporal change detection.",
     )
     if image2_file:
-        st.image(image2_file, caption="Secondary Image", use_container_width=True)
+        disp2 = get_display_image(image2_file)
+        if disp2 is not None:
+            st.image(disp2, caption=f"Secondary Image: {image2_file.name}", use_container_width=True)
+        else:
+            st.info(f"📄 Loaded file: {image2_file.name}")
 
 st.markdown("---")
 
@@ -144,8 +173,12 @@ if st.button("🔍 Analyze with Agent", type="primary", use_container_width=True
         st.error("⚠️ Please enter a question or instruction for the agent.")
     else:
         with st.spinner("🤖 Agent analyzing query, planning tools, and executing models..."):
+            image1_file.seek(0)
             img1_bytes = image1_file.read()
-            img2_bytes = image2_file.read() if image2_file else None
+            img2_bytes = None
+            if image2_file:
+                image2_file.seek(0)
+                img2_bytes = image2_file.read()
             fname1 = image1_file.name
             fname2 = image2_file.name if image2_file else ""
 

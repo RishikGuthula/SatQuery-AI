@@ -143,14 +143,28 @@ class RasterImage:
             return 1
         return self.data.shape[2]
 
+    BAND_ALIASES = {
+        "red": ["red", "b04", "b4", "band 4", "band4", "r"],
+        "green": ["green", "b03", "b3", "band 3", "band3", "g"],
+        "blue": ["blue", "b02", "b2", "band 2", "band2", "b"],
+        "nir": ["nir", "b08", "b8", "b8a", "band 8", "band8", "near_infrared"],
+        "swir": ["swir", "swir1", "b11", "band 11", "band11"],
+        "swir1": ["swir1", "swir", "b11", "band 11", "band11"],
+        "swir2": ["swir2", "b12", "band 12", "band12"],
+    }
+
     def has_band(self, name: str) -> bool:
-        """Check if a named band is available (case-insensitive)."""
-        return any(b.lower() == name.lower() for b in self.bands)
+        """Check if a named band is available (case-insensitive with sensor aliases)."""
+        name_lower = name.lower().strip()
+        aliases = self.BAND_ALIASES.get(name_lower, [name_lower])
+        return any(b.lower().strip() in aliases for b in self.bands)
 
     def get_band_index(self, name: str) -> int | None:
         """Return index of named band, or None."""
+        name_lower = name.lower().strip()
+        aliases = self.BAND_ALIASES.get(name_lower, [name_lower])
         for i, b in enumerate(self.bands):
-            if b.lower() == name.lower():
+            if b.lower().strip() in aliases:
                 return i
         return None
 
@@ -167,23 +181,38 @@ class RasterImage:
         """
         Extract/convert to an RGB uint8 array for display and visual reasoning.
 
-        If data has >= 3 bands, use first three.
-        If single-band, replicate to 3 channels.
+        If data has named red, green, blue bands, extracts them in RGB order.
+        If single-band (like mode I GeoTIFF), replicates to 3 channels with robust contrast stretching.
         """
-        if self.data.ndim == 2:
-            gray = self.data
+        if self.has_band("red") and self.has_band("green") and self.has_band("blue"):
+            r = self.get_band("red")
+            g = self.get_band("green")
+            b = self.get_band("blue")
+            if r is not None and g is not None and b is not None:
+                gray = np.stack([r, g, b], axis=-1)
+            else:
+                gray = self.data[:, :, :3] if self.data.ndim == 3 and self.data.shape[2] >= 3 else np.stack([self.data[:, :, 0]] * 3, axis=-1)
+        elif self.data.ndim == 2:
+            gray = np.stack([self.data] * 3, axis=-1)
         elif self.num_bands >= 3:
             gray = self.data[:, :, :3]
         else:
             gray = np.stack([self.data[:, :, 0]] * 3, axis=-1)
 
-        # Normalize to 0-255 uint8
-        if gray.dtype == np.uint8:
-            return gray
-        gmin, gmax = float(np.nanmin(gray)), float(np.nanmax(gray))
-        if gmax - gmin < 1e-8:
+        # Normalize to 0-255 uint8 with percentile stretch for scientific dynamic range
+        gray = gray.astype(np.float32)
+        if np.all(np.isnan(gray)):
             return np.zeros((*gray.shape[:2], 3), dtype=np.uint8)
-        normalized = ((gray - gmin) / (gmax - gmin) * 255.0).clip(0, 255).astype(np.uint8)
+
+        p2 = float(np.nanpercentile(gray, 1))
+        p98 = float(np.nanpercentile(gray, 99))
+        if p98 - p2 < 1e-6:
+            gmin, gmax = float(np.nanmin(gray)), float(np.nanmax(gray))
+            if gmax - gmin < 1e-6:
+                return np.zeros((*gray.shape[:2], 3), dtype=np.uint8)
+            p2, p98 = gmin, gmax
+
+        normalized = np.clip((gray - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
         return normalized
 
     def to_pil(self) -> Image.Image:

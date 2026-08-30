@@ -28,25 +28,47 @@ NDVI_VEGETATION_THRESHOLD = 0.2
 RGB_GREENNESS_THRESHOLD = 0.1
 
 
-def detect_vegetation(image: RasterImage) -> AnalysisResult:
+def detect_vegetation(image: RasterImage, image2: RasterImage | None = None) -> AnalysisResult:
     """
     Detect vegetation in the image.
 
-    For multispectral images with NIR + Red bands:
+    For multispectral images with NIR + Red bands (or separate B04/B08 GeoTIFF uploads):
         Uses true NDVI (Rouse et al. 1974).
     For RGB-only images:
         Uses a greenness color proxy (clearly labeled as heuristic).
     """
     logger.info(f"Vegetation detection: sensor_type={image.sensor_type}, bands={image.bands}")
 
+    # Check single image with both NIR and Red
     if can_compute_ndvi(image):
-        # True NDVI
         index = calculate_ndvi(image)
         mask = create_mask(index, threshold=NDVI_VEGETATION_THRESHOLD, above=True)
         index_name = "NDVI (Rouse et al. 1974)"
         method = "true_ndvi"
         answer_text = _format_vegetation_answer(mask, image, method="NDVI")
         tool_name = "vegetation_detection (NDVI)"
+    # Check separate GeoTIFF band uploads (e.g. B04.tif as image1 and B08.tif as image2)
+    elif image2 is not None and (
+        (image.has_band("red") and image2.has_band("nir"))
+        or (image.has_band("nir") and image2.has_band("red"))
+    ):
+        red_band = image.get_band("red") if image.has_band("red") else image2.get_band("red")
+        nir_band = image2.get_band("nir") if image2.has_band("nir") else image.get_band("nir")
+        if red_band is not None and nir_band is not None and red_band.shape == nir_band.shape:
+            from tools.spectral import _normalized_index
+            index = _normalized_index(nir_band, red_band, image.nodata)
+            mask = create_mask(index, threshold=NDVI_VEGETATION_THRESHOLD, above=True)
+            index_name = "NDVI (Rouse et al. 1974 — Dual Band GeoTIFF)"
+            method = "true_ndvi"
+            answer_text = _format_vegetation_answer(mask, image, method="NDVI")
+            tool_name = "vegetation_detection (NDVI)"
+        else:
+            index = rgb_greenness_index(image)
+            mask = create_mask(index, threshold=RGB_GREENNESS_THRESHOLD, above=True)
+            index_name = "RGB Greenness Proxy (heuristic — NOT NDVI)"
+            method = "rgb_greenness"
+            answer_text = _format_vegetation_answer(mask, image, method="RGB greenness")
+            tool_name = "vegetation_detection (RGB proxy)"
     else:
         # RGB proxy
         index = rgb_greenness_index(image)

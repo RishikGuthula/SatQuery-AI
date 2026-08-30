@@ -95,6 +95,11 @@ class FunctionCapability(Capability):
                     metadata={"error": "missing_second_image"},
                 )
             return self.fn(context.image1, context.image2)
+        if context.image2 is not None:
+            try:
+                return self.fn(context.image1, context.image2)
+            except TypeError:
+                return self.fn(context.image1)
         return self.fn(context.image1)
 
 

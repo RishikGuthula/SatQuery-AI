@@ -188,8 +188,11 @@ def _fallback_to_deterministic(
             tasks.append(TaskItem(capability="geochat", reason="Visual reasoning for image description"))
         else:
             tasks.append(TaskItem(capability="image_description", reason="Rule-based baseline description"))
+    elif intent == Intent.OPTICAL_SAR_ANALYSIS:
+        tasks.append(TaskItem(capability="bifold", reason="Multi-modal optical+SAR land-cover classification via BIFOLD RDNet"))
     elif intent == Intent.UNSUPPORTED:
         tasks.append(TaskItem(capability="unsupported", reason=plan_res.reasoning))
+
 
     return ExecutionPlan(
         intent=intent.value,

@@ -55,7 +55,26 @@ def load_from_bytes(data: bytes, filename: str = "unknown") -> RasterImage:
             f"Maximum allowed: {MAX_FILE_SIZE // 1024 // 1024} MB."
         )
 
+    if filename.lower().endswith(".npz"):
+        try:
+            with io.BytesIO(data) as buf:
+                npz = np.load(buf)
+                band_keys = list(npz.keys())
+                stacked = np.stack([npz[k] for k in band_keys], axis=2)
+                h, w, _ = stacked.shape
+                return RasterImage(
+                    data=stacked.astype(np.float32),
+                    bands=band_keys,
+                    sensor_type=SensorType.MULTISPECTRAL if len(band_keys) > 3 else SensorType.RGB,
+                    width=w,
+                    height=h,
+                    metadata={"source": filename},
+                )
+        except Exception as e:
+            raise ImageLoadError(f"Cannot load .npz archive: {e}")
+
     return _load_with_pil(data, filename)
+
 
 
 def _load_with_pil(data: bytes, filename: str) -> RasterImage:

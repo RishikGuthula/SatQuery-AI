@@ -21,6 +21,7 @@ from tools.vegetation_detection import detect_vegetation
 from tools.builtup_detection import detect_builtup
 from tools.change_detection import detect_changes
 from tools.changeformer_tool import detect_changes_changeformer
+from tools.bifold_tool import analyze_optical_sar_bifold
 from vlm.client import get_vlm
 
 # Type aliases
@@ -44,6 +45,9 @@ TOOLS: dict[str, callable] = {
     "builtup_detection": detect_builtup,
     "change_detection": detect_changes_changeformer,
     "changeformer": detect_changes_changeformer,
+    "bifold": analyze_optical_sar_bifold,
+    "bifold_rdnet": analyze_optical_sar_bifold,
+    "optical_sar": analyze_optical_sar_bifold,
 }
 
 
@@ -121,6 +125,7 @@ class UnsupportedCapability(Capability):
                 "- Vegetation detection (NDVI / forest, agriculture, greenness)\n"
                 "- Built-up area detection (NDBI / urban, structures)\n"
                 "- Change detection (between two temporal satellite images)\n"
+                "- Multi-modal Optical + SAR land-cover classification via BIFOLD RDNet Base\n"
                 "- Remote visual interpretation via GeoChat-7B\n"
             ),
             tool_used="unsupported_handler",
@@ -174,6 +179,26 @@ def register_all_capabilities() -> None:
             description="ChangeFormer bi-temporal Transformer model for remote sensing satellite change detection.",
             fn=detect_changes_changeformer,
             supported_inputs=["dual_image"],
+        )
+    )
+
+    # Multi-modal AI Models
+    reg.register(
+        FunctionCapability(
+            name="bifold",
+            description="BIFOLD RDNet Base model for 12-channel Sentinel-1 (VV, VH) + Sentinel-2 multispectral land-cover classification.",
+            fn=analyze_optical_sar_bifold,
+            supported_inputs=["single_image"],
+            required_bands=["vv", "vh", "b02", "b03", "b04", "b05", "b06", "b07", "b08", "b8a", "b11", "b12"],
+        )
+    )
+    reg.register(
+        FunctionCapability(
+            name="bifold_rdnet",
+            description="Alias for BIFOLD RDNet Base multi-modal optical+SAR classification.",
+            fn=analyze_optical_sar_bifold,
+            supported_inputs=["single_image"],
+            required_bands=["vv", "vh", "b02", "b03", "b04", "b05", "b06", "b07", "b08", "b8a", "b11", "b12"],
         )
     )
 

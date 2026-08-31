@@ -111,10 +111,10 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown("### 📷 Primary Image")
     image1_file = st.file_uploader(
-        "Upload Optical / Multispectral Image",
-        type=["tif", "tiff", "png", "jpg", "jpeg"],
+        "Upload Optical / Multispectral / Multi-Modal Image",
+        type=["tif", "tiff", "png", "jpg", "jpeg", "npz"],
         key="img1",
-        help="Accepts standard RGB images (PNG, JPEG) and multispectral GeoTIFFs.",
+        help="Accepts standard RGB images (PNG, JPEG), multispectral GeoTIFFs, and 12-channel Sentinel-1+Sentinel-2 archives (.npz).",
     )
     if image1_file:
         disp1 = get_display_image(image1_file)
@@ -144,7 +144,7 @@ st.markdown("---")
 st.markdown("### 💬 Ask the Agent")
 query = st.text_input(
     "Enter your query about the satellite image(s):",
-    placeholder="e.g., Find water bodies and vegetation, Describe the landscape, Compare these images",
+    placeholder="e.g., Find water bodies, Classify land cover with Sentinel-1 and Sentinel-2, Compare these images",
 )
 
 # Example queries expander
@@ -157,13 +157,18 @@ with st.expander("💡 Example Queries"):
           - *"Show built-up areas and structures"*
           - *"Describe what you see in this satellite image"*
           - *"Find water and vegetation and explain the scene"*
-        * **Dual Image Comparison:**
+        * **Multi-Modal Optical + SAR Analysis (BIFOLD RDNet Base):**
+          - *"Classify the land cover using Sentinel-1 and Sentinel-2"*
+          - *"Analyze this optical and SAR imagery"*
+          - *(Note: BIFOLD requires 12 bands: Sentinel-1 VV, VH + Sentinel-2 B02-B08, B8A, B11, B12)*
+        * **Dual Image Comparison (ChangeFormer):**
           - *"Compare these two images and highlight changes"*
           - *"Detect land-cover changes between before and after"*
         * **Conversational Follow-up:**
           - *"What about the vegetation coverage?"*
         """
     )
+
 
 # ── Analyze Button & Pipeline ───────────────────────────────────────
 if st.button("🔍 Analyze with Agent", type="primary", use_container_width=True):

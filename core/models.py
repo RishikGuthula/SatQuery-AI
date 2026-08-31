@@ -34,7 +34,9 @@ class Intent(str, Enum):
     CHANGE_DETECTION = "change_detection"
     IMAGE_DESCRIPTION = "image_description"
     MULTI_FEATURE_ANALYSIS = "multi_feature_analysis"
+    OPTICAL_SAR_ANALYSIS = "optical_sar_analysis"
     UNSUPPORTED = "unsupported"
+
 
 
 @dataclass

@@ -53,6 +53,17 @@ _ROUTING_RULES: list[tuple[list[str], Intent]] = [
          "built-up", "built up", "impervious", "structure"],
         Intent.BUILTUP_DETECTION,
     ),
+    # Multi-modal Optical + SAR / Land-cover classification (BIFOLD RDNet)
+    (
+        [
+            "optical and sar", "optical + sar", "sentinel-1 and sentinel-2",
+            "sentinel-1 + sentinel-2", "s1 and s2", "s1 + s2", "bifold",
+            "rdnet", "sar analysis", "sar imagery", "land-cover classification",
+            "land cover classification", "classify land cover", "radar and optical",
+            "sar and optical", "bigearthnet",
+        ],
+        Intent.OPTICAL_SAR_ANALYSIS,
+    ),
     # General description
     (
         ["describe", "what is", "what do you see", "explain", "summary",
@@ -60,6 +71,7 @@ _ROUTING_RULES: list[tuple[list[str], Intent]] = [
         Intent.IMAGE_DESCRIPTION,
     ),
 ]
+
 
 
 def plan_query(query: str, has_second_image: bool = False) -> PlanResult:

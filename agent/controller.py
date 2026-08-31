@@ -327,8 +327,21 @@ def _execute_legacy_fallback(
                 except TypeError:
                     return tool_fn(raster1)
 
+    # Multi-modal Optical + SAR
+    if intent == Intent.OPTICAL_SAR_ANALYSIS:
+        from tools.bifold_tool import analyze_optical_sar_bifold, BIFOLDToolError
+        try:
+            return analyze_optical_sar_bifold(raster1, query=plan.reasoning)
+        except BIFOLDToolError as e:
+            return AnalysisResult(
+                answer=f"❌ BIFOLD analysis failed: {e}",
+                tool_used="bifold_rdnet (error)",
+                metadata={"error": str(e)},
+            )
+
     # Image description
     if intent == Intent.IMAGE_DESCRIPTION:
+
         vlm = get_vlm()
         answer = vlm.analyze("", raster1)
         return AnalysisResult(

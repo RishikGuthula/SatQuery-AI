@@ -162,3 +162,42 @@ def test_routing_single_image_queries():
     for q in single_queries:
         plan = plan_query(q, has_second_image=False)
         assert plan.intent == Intent.IMAGE_DESCRIPTION, f"Single query failed routing: {q}"
+
+
+# ── Test 16: Real Satellite Bi-Temporal Inference with Pretrained Checkpoint ──
+def test_real_bitemporal_inference_with_checkpoint():
+    import os
+    t1_path = "sample_data/levir_cd/real_t1.png"
+    t2_path = "sample_data/levir_cd/real_t2.png"
+    ckpt_path = "models/checkpoints/changeformer_mit_b0.pth"
+
+    if not (os.path.exists(t1_path) and os.path.exists(t2_path) and os.path.exists(ckpt_path)):
+        pytest.skip("Real satellite test images or checkpoint not found on disk")
+
+    im1 = Image.open(t1_path)
+    im2 = Image.open(t2_path)
+    raster1 = RasterImage(
+        data=np.array(im1, dtype=np.float32),
+        bands=["red", "green", "blue"],
+        sensor_type=SensorType.RGB,
+        width=im1.width,
+        height=im1.height,
+    )
+    raster2 = RasterImage(
+        data=np.array(im2, dtype=np.float32),
+        bands=["red", "green", "blue"],
+        sensor_type=SensorType.RGB,
+        width=im2.width,
+        height=im2.height,
+    )
+
+    adapter = ChangeFormerAdapter(checkpoint_path=ckpt_path, require_checkpoint=True)
+    assert adapter.loaded_checkpoint is True, "Pretrained checkpoint must be loaded"
+
+    res = adapter.predict(raster1, raster2)
+    assert res["checkpoint_loaded"] is True
+    assert res["total_pixels"] == raster1.width * raster1.height
+    assert isinstance(res["mask"], np.ndarray)
+    assert res["mask"].shape == (raster1.height, raster1.width)
+    assert 0.0 <= res["change_percentage"] <= 100.0
+    assert 0.0 <= res["confidence"] <= 1.0

@@ -104,24 +104,91 @@ def tokenizer_image_token(prompt: str, tokenizer, image_token_index: int = IMAGE
     return input_ids
 
 
+def patch_clip_vision_tower():
+    """
+    Patch CLIPVisionTower in both imported modules and future dynamic imports
+    to fix the meta-device RuntimeError during from_pretrained().
+    """
+    def safe_clip_vision_tower_init(self, vision_tower, args, delay_load=False):
+        super(type(self), self).__init__()
+        self.is_loaded = False
+        self.vision_tower_name = vision_tower
+        self.select_layer = getattr(args, "mm_vision_select_layer", -2)
+        self.select_feature = getattr(args, "mm_vision_select_feature", "patch")
+
+        if not delay_load:
+            self.load_model()
+        else:
+            from transformers import CLIPVisionConfig
+            self.cfg_only = CLIPVisionConfig.from_pretrained(self.vision_tower_name)
+
+    # 1. Patch in geochat if imported
+    try:
+        import geochat.model.multimodal_encoder.clip_encoder as ce
+        ce.CLIPVisionTower.__init__ = safe_clip_vision_tower_init
+        logger.info("✅ Patched geochat.model.multimodal_encoder.clip_encoder.CLIPVisionTower.__init__")
+    except Exception:
+        pass
+
+    # 2. Patch in sys.modules if any transformers_modules already loaded
+    for mod_name, mod in list(sys.modules.items()):
+        if "clip_encoder" in mod_name and hasattr(mod, "CLIPVisionTower"):
+            mod.CLIPVisionTower.__init__ = safe_clip_vision_tower_init
+            logger.info(f"✅ Patched {mod_name}.CLIPVisionTower.__init__")
+
+    # 3. Hook dynamic module loader
+    try:
+        import transformers.dynamic_module_utils as dmu
+        if not getattr(dmu, "_geochat_hooked", False):
+            orig_get_class = dmu.get_class_from_dynamic_module
+
+            def hooked_get_class(*args, **kwargs):
+                cls = orig_get_class(*args, **kwargs)
+                if hasattr(cls, "__name__") and cls.__name__ == "CLIPVisionTower":
+                    cls.__init__ = safe_clip_vision_tower_init
+                return cls
+
+            dmu.get_class_from_dynamic_module = hooked_get_class
+            dmu._geochat_hooked = True
+    except Exception:
+        pass
+
+
 def load_geochat_model():
     """
     Load GeoChat-7B into GPU memory once during server startup.
-    Supports MBZUAI/geochat-7b or local checkpoint directory.
+    Supports MBZUAI/geochat-7b or local checkpoint directory with 4-bit quantization.
     """
     model_path = os.environ.get("GEOCHAT_MODEL_PATH", "MBZUAI/geochat-7b")
     logger.info(f"Loading GeoChat-7B from '{model_path}'...")
 
+    # Discover and add GeoChat paths to sys.path
+    possible_paths = [
+        "/kaggle/working/GeoChat",
+        "/kaggle/working/SatQuery-AI",
+        "/content/GeoChat",
+        "/content/SatQuery-AI",
+        os.path.join(os.getcwd(), "GeoChat"),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "GeoChat")),
+    ]
+    for p in possible_paths:
+        if os.path.exists(p) and p not in sys.path:
+            sys.path.insert(0, p)
+            logger.info(f"Added '{p}' to sys.path")
+
     try:
         import torch
-        from transformers import AutoTokenizer, AutoConfig
+        from transformers import AutoTokenizer, AutoConfig, BitsAndBytesConfig
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-        load_in_4bit = os.environ.get("LOAD_IN_4BIT", "false").lower() in ("true", "1")
+        load_in_4bit = os.environ.get("LOAD_IN_4BIT", "true").lower() in ("true", "1")
         load_in_8bit = os.environ.get("LOAD_IN_8BIT", "false").lower() in ("true", "1")
 
         logger.info(f"Target device: {device.upper()} | Data type: {dtype} | 4-bit: {load_in_4bit} | 8-bit: {load_in_8bit}")
+
+        # Always apply CLIP vision tower meta-device fix before loading
+        patch_clip_vision_tower()
 
         # Strategy 1: Attempt to load via official GeoChat package if installed/cloned
         loaded = False
@@ -129,6 +196,7 @@ def load_geochat_model():
             from geochat.model.builder import load_pretrained_model
             from geochat.mm_utils import get_model_name_from_path
 
+            patch_clip_vision_tower()
             model_name = get_model_name_from_path(model_path) or "geochat-7b"
             tokenizer, model, image_processor, context_len = load_pretrained_model(
                 model_path=model_path,
@@ -140,13 +208,15 @@ def load_geochat_model():
             )
             MODEL_STATE["use_official_builder"] = True
             loaded = True
-            logger.info("✅ GeoChat loaded via official geochat.model.builder.")
+            logger.info("✅ GeoChat loaded successfully via official geochat.model.builder.")
         except Exception as e:
-            logger.info(f"geochat builder not used ({e}). Falling back to direct HuggingFace loader...")
+            logger.warning(f"geochat builder failed or not found ({e}). Trying direct HuggingFace loader with meta-device fix...")
 
         # Strategy 2: Direct Hugging Face Transformers loader with 504x504 CLIP image processor
         if not loaded:
             from transformers import AutoModelForCausalLM, CLIPImageProcessor
+
+            patch_clip_vision_tower()
 
             tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
             image_processor = CLIPImageProcessor.from_pretrained(
@@ -157,10 +227,16 @@ def load_geochat_model():
 
             kwargs = {"torch_dtype": dtype}
             if load_in_4bit:
-                kwargs["load_in_4bit"] = True
+                kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_quant_type="nf4",
+                )
             elif load_in_8bit:
                 kwargs["load_in_8bit"] = True
-            elif device == "cuda":
+
+            if device == "cuda":
                 kwargs["device_map"] = "auto"
 
             model = AutoModelForCausalLM.from_pretrained(
@@ -169,6 +245,17 @@ def load_geochat_model():
                 trust_remote_code=True,
                 **kwargs
             )
+            patch_clip_vision_tower()
+
+            # Ensure vision tower weights are loaded outside of meta-device context
+            vision_tower = getattr(model, "get_vision_tower", lambda: getattr(getattr(model, "model", None), "vision_tower", None))()
+            if vision_tower is not None and not getattr(vision_tower, "is_loaded", False):
+                logger.info("Initializing CLIP Vision Tower weights outside of meta-device context...")
+                vision_tower.load_model()
+                vision_tower.to(device=device, dtype=dtype)
+                if hasattr(vision_tower, "image_processor") and vision_tower.image_processor is not None:
+                    image_processor = vision_tower.image_processor
+
             context_len = getattr(model.config, "max_sequence_length", 2048)
             MODEL_STATE["use_official_builder"] = False
 

@@ -13,6 +13,7 @@ import logging
 from llm.base import LLMProvider, LLMMessage, LLMResponse
 from llm.providers.openai_provider import OpenAIProvider
 from llm.providers.gemini_provider import GeminiProvider
+from llm.providers.nim_provider import NvidiaNIMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -71,50 +72,72 @@ def _load_env_if_present():
 def get_llm_client() -> LLMClient:
     """
     Construct an LLMClient based on environment variables:
-    LLM_PROVIDER ("openai", "gemini")
-    LLM_API_KEY (or GEMINI_API_KEY / GOOGLE_API_KEY)
-    LLM_MODEL
+    LLM_PROVIDER ("nvidia", "openai", "gemini")
+    NVIDIA_NIM_API_KEY / NVIDIA_API_KEY / LLM_API_KEY
+    LLM_MODEL / NVIDIA_NIM_MODEL
     LLM_TIMEOUT
     """
     _load_env_if_present()
 
     provider_name = os.environ.get("LLM_PROVIDER", "").strip().lower()
     api_key = (
-        os.environ.get("LLM_API_KEY", "").strip()
+        os.environ.get("NVIDIA_NIM_API_KEY", "").strip()
+        or os.environ.get("NVIDIA_API_KEY", "").strip()
+        or os.environ.get("LLM_API_KEY", "").strip()
         or os.environ.get("GEMINI_API_KEY", "").strip()
         or os.environ.get("GOOGLE_API_KEY", "").strip()
         or os.environ.get("OPENAI_API_KEY", "").strip()
     )
-    model = os.environ.get("LLM_MODEL", "").strip()
-    timeout_str = os.environ.get("LLM_TIMEOUT", "60").strip()
+    model = (
+        os.environ.get("NVIDIA_NIM_MODEL", "").strip()
+        or os.environ.get("LLM_MODEL", "").strip()
+    )
+    timeout_str = (
+        os.environ.get("NVIDIA_NIM_TIMEOUT", "").strip()
+        or os.environ.get("LLM_TIMEOUT", "120").strip()
+    )
 
     try:
         timeout = int(timeout_str)
     except ValueError:
-        timeout = 60
+        timeout = 120
 
     if not api_key:
         logger.debug("No LLM_API_KEY found. LLM client in offline/fallback mode.")
         return LLMClient(provider=None)
 
+    # 1. NVIDIA NIM Provider
+    if provider_name in ("nvidia", "nim", "nemotron") or api_key.startswith("nvapi-"):
+        base_url = os.environ.get("NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1").strip()
+        nim_model = model or "nvidia/nemotron-3.5-lightning-30b-a3b"
+        provider = NvidiaNIMProvider(api_key=api_key, base_url=base_url, model=nim_model, timeout=timeout)
+        return LLMClient(provider=provider)
+
+    # 2. OpenAI Provider
     if provider_name in ("openai", "chatgpt"):
         provider = OpenAIProvider(api_key=api_key, model=model or "gpt-4o-mini", timeout=timeout)
         return LLMClient(provider=provider)
-    elif provider_name in ("gemini", "google"):
+
+    # 3. Gemini Provider
+    if provider_name in ("gemini", "google"):
         provider = GeminiProvider(api_key=api_key, model=model or "gemini-3.6-flash", timeout=timeout)
         return LLMClient(provider=provider)
-    elif api_key.startswith("sk-"):
-        # Auto-detect OpenAI key
+
+    # 4. Auto-detect by key prefix
+    if api_key.startswith("sk-"):
         logger.info("Auto-detected OpenAI API key format.")
         provider = OpenAIProvider(api_key=api_key, model=model or "gpt-4o-mini", timeout=timeout)
         return LLMClient(provider=provider)
     elif api_key.startswith("AIza") or "gemini" in provider_name or "google" in provider_name:
-        # Auto-detect Gemini key
         logger.info("Auto-detected Gemini API key format.")
         provider = GeminiProvider(api_key=api_key, model=model or "gemini-3.6-flash", timeout=timeout)
         return LLMClient(provider=provider)
 
-    # If key exists but provider wasn't specified, try Gemini first (free tier / standard)
-    logger.info("Defaulting configured API key to Gemini provider.")
+    # Default to NVIDIA NIM if provider not explicitly specified but configured
+    if "nemotron" in model.lower() or "nvidia" in model.lower():
+        base_url = os.environ.get("NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1").strip()
+        provider = NvidiaNIMProvider(api_key=api_key, base_url=base_url, model=model or "nvidia/nemotron-3.5-lightning-30b-a3b", timeout=timeout)
+        return LLMClient(provider=provider)
+
     provider = GeminiProvider(api_key=api_key, model=model or "gemini-3.6-flash", timeout=timeout)
     return LLMClient(provider=provider)

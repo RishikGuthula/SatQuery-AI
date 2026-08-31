@@ -83,9 +83,35 @@ with st.sidebar:
     else:
         st.info("⚪ **GeoChat-7B GPU:** Standby / Offline")
 
+    # Local Compute Device Detection
+    reg = get_registry()
+    try:
+        import torch
+        if torch.backends.mps.is_available():
+            device_label = "MPS"
+        elif torch.cuda.is_available():
+            device_label = "CUDA"
+        else:
+            device_label = "CPU"
+    except Exception:
+        device_label = "CPU"
+
+    # ChangeFormer (T1/T2 Bi-temporal) Status
+    cf_cap = reg.get("changeformer") or reg.get("change_detection")
+    if cf_cap and cf_cap.is_available():
+        st.success(f"🟢 **ChangeFormer:** Active (Local {device_label})")
+    else:
+        st.info("⚪ **ChangeFormer:** Standby / Offline")
+
+    # BIFOLD RDNet (Optical + SAR) Status
+    bifold_cap = reg.get("bifold") or reg.get("bifold_rdnet")
+    if bifold_cap and bifold_cap.is_available():
+        st.success(f"🟢 **BIFOLD RDNet:** Active (Local {device_label})")
+    else:
+        st.info("⚪ **BIFOLD RDNet:** Standby / Offline")
+
     st.markdown("---")
     st.markdown("### 🛠️ Active Capabilities")
-    reg = get_registry()
     for cap in reg.list_available():
         st.markdown(f"- **{cap.name.upper()}**: {cap.description[:45]}...")
 

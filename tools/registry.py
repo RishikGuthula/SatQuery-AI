@@ -20,6 +20,7 @@ from tools.water_detection import detect_water
 from tools.vegetation_detection import detect_vegetation
 from tools.builtup_detection import detect_builtup
 from tools.change_detection import detect_changes
+from tools.changeformer_tool import detect_changes_changeformer
 from vlm.client import get_vlm
 
 # Type aliases
@@ -34,14 +35,15 @@ SINGLE_IMAGE_TOOLS: dict[Intent, SingleImageTool] = {
 }
 
 DUAL_IMAGE_TOOLS: dict[Intent, DualImageTool] = {
-    Intent.CHANGE_DETECTION: detect_changes,
+    Intent.CHANGE_DETECTION: detect_changes_changeformer,
 }
 
 TOOLS: dict[str, callable] = {
     "water_detection": detect_water,
     "vegetation_detection": detect_vegetation,
     "builtup_detection": detect_builtup,
-    "change_detection": detect_changes,
+    "change_detection": detect_changes_changeformer,
+    "changeformer": detect_changes_changeformer,
 }
 
 
@@ -161,8 +163,16 @@ def register_all_capabilities() -> None:
     reg.register(
         FunctionCapability(
             name="change_detection",
-            description="Detects land-cover changes between two images using color Euclidean difference and adaptive thresholding.",
-            fn=detect_changes,
+            description="Detects land-cover changes between two bi-temporal satellite images using ChangeFormer deep-learning architecture.",
+            fn=detect_changes_changeformer,
+            supported_inputs=["dual_image"],
+        )
+    )
+    reg.register(
+        FunctionCapability(
+            name="changeformer",
+            description="ChangeFormer bi-temporal Transformer model for remote sensing satellite change detection.",
+            fn=detect_changes_changeformer,
             supported_inputs=["dual_image"],
         )
     )

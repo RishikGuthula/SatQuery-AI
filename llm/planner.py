@@ -179,7 +179,7 @@ def _fallback_to_deterministic(
     elif intent == Intent.BUILTUP_DETECTION:
         tasks.append(TaskItem(capability="builtup_detection", reason="Deterministic keyword match for built-up"))
     elif intent == Intent.CHANGE_DETECTION:
-        tasks.append(TaskItem(capability="change_detection", reason="Deterministic keyword match for change detection"))
+        tasks.append(TaskItem(capability="changeformer", reason="Bi-temporal change detection via ChangeFormer"))
     elif intent == Intent.IMAGE_DESCRIPTION:
         # Prefer GeoChat if registered & available, else image_description
         registry = get_registry()

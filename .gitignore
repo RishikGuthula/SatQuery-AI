@@ -42,7 +42,7 @@ build/
 *.h5
 *.ckpt
 checkpoints/
-models/
+models/checkpoints/
 geochat_weights/
 data/
 sample_data/

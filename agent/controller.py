@@ -24,7 +24,7 @@ from core.registry import get_registry, ExecutionContext
 from llm.planner import plan_with_llm, ExecutionPlan, TaskItem
 from llm.synthesis import synthesize_results
 from tools.registry import SINGLE_IMAGE_TOOLS
-from tools.change_detection import detect_changes, ChangeDetectionError
+from tools.changeformer_tool import detect_changes_changeformer, ChangeFormerError
 from vlm.client import get_vlm
 
 logger = logging.getLogger(__name__)
@@ -305,11 +305,11 @@ def _execute_legacy_fallback(
                 metadata={"reason": "missing_second_image"},
             )
         try:
-            return detect_changes(raster1, raster2)
-        except ChangeDetectionError as e:
+            return detect_changes_changeformer(raster1, raster2)
+        except ChangeFormerError as e:
             return AnalysisResult(
                 answer=f"❌ Change detection failed: {e}",
-                tool_used="change_detection (error)",
+                tool_used="changeformer (error)",
                 metadata={"error": str(e)},
             )
 

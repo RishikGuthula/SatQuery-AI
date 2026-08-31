@@ -26,6 +26,14 @@ class PlanResult:
 
 # Keyword rules: (keywords, intent)
 _ROUTING_RULES: list[tuple[list[str], Intent]] = [
+    # Change detection (bi-temporal change between two images)
+    (
+        ["change", "difference", "comparison", "compare", "before", "after",
+         "temporal", "land use change", "deforestation", "urbanization",
+         "detect change", "changes between", "what changed", "show areas that changed",
+         "area change", "changeformer"],
+        Intent.CHANGE_DETECTION,
+    ),
     # Water detection
     (
         ["water", "river", "lake", "ocean", "flood", "pond", "reservoir",
@@ -45,17 +53,10 @@ _ROUTING_RULES: list[tuple[list[str], Intent]] = [
          "built-up", "built up", "impervious", "structure"],
         Intent.BUILTUP_DETECTION,
     ),
-    # Change detection (needs two images)
-    (
-        ["change", "difference", "comparison", "compare", "before", "after",
-         "temporal", "land use change", "deforestation", "urbanization",
-         "detect change", "changes between"],
-        Intent.CHANGE_DETECTION,
-    ),
     # General description
     (
         ["describe", "what is", "what do you see", "explain", "summary",
-         "overview", "tell me about", "show me"],
+         "overview", "tell me about", "show me", "identify", "object"],
         Intent.IMAGE_DESCRIPTION,
     ),
 ]

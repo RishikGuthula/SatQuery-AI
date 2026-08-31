@@ -267,6 +267,8 @@ if st.session_state.last_result is not None:
                 st.markdown(f"- **Computed feature coverage:** {meta['coverage_percent']}%")
             if "changed_percent" in meta:
                 st.markdown(f"- **Changed area:** {meta['changed_percent']}%")
+            elif "change_percentage" in meta:
+                st.markdown(f"- **Changed area:** {meta['change_percentage']}%")
             if "alignment_method" in meta:
                 st.markdown(f"- **Pair alignment method:** {meta['alignment_method']}")
 

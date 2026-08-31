@@ -1,4 +1,10 @@
-streamlit
-numpy
-Pillow
-matplotlib
+streamlit>=1.30.0
+Pillow>=10.2.0,<11.0.0
+numpy>=1.24.0
+rasterio>=1.3.0
+torch
+torchvision
+transformers
+accelerate
+peft
+rich>=10.14.0

@@ -305,11 +305,27 @@ class ChangeFormerAdapter:
     def predict(self, raster_t1: RasterImage, raster_t2: RasterImage) -> Dict[str, Any]:
         """
         Run bi-temporal change prediction on T1 and T2 images.
+        Automatically aligns T2 spatial dimensions to T1 if mismatched.
         """
+        if raster_t1 is None or raster_t2 is None:
+            raise ValueError("Both raster_t1 and raster_t2 are required for ChangeFormer prediction.")
+
+        if raster_t1.width != raster_t2.width or raster_t1.height != raster_t2.height:
+            logger.info(
+                f"ChangeFormerAdapter: Auto-aligning T2 from {raster_t2.width}x{raster_t2.height} "
+                f"to match T1 {raster_t1.width}x{raster_t1.height}."
+            )
+            raster_t2 = raster_t2.resize(raster_t1.width, raster_t1.height)
+
         orig_h, orig_w = raster_t1.height, raster_t1.width
 
         t1_tensor = self.preprocess_image(raster_t1).to(self.device)
         t2_tensor = self.preprocess_image(raster_t2).to(self.device)
+
+        if t1_tensor.shape != t2_tensor.shape:
+            raise RuntimeError(
+                f"Tensor shape mismatch after preprocessing: T1 is {t1_tensor.shape}, T2 is {t2_tensor.shape}"
+            )
 
         logits = self.model(t1_tensor, t2_tensor)
         probs = F.softmax(logits, dim=1)  # Shape: (1, 2, H, W)

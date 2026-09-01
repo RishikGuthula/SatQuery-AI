@@ -348,7 +348,12 @@ def _fallback_rule_based_synthesis(
             else:
                 observations.append(f"Bi-temporal change detected across {chg:.2f}% of the monitored region.")
                 evidence.append("ChangeFormer deep Transformer bi-temporal change detection")
-                if "alignment_method" in meta:
+                if meta.get("alignment_applied"):
+                    evidence.append(f"Pair spatial alignment: {meta.get('aligned_from')} → {meta.get('aligned_to')} px")
+                    observations.append(
+                        f"Secondary image automatically aligned from {meta.get('aligned_from')} to {meta.get('aligned_to')} px for bi-temporal comparison."
+                    )
+                elif "alignment_method" in meta:
                     evidence.append(f"Pair alignment method: {meta['alignment_method']}")
                 confidence = "High — ChangeFormer Transformer architecture"
 

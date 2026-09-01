@@ -101,13 +101,76 @@ def test_invalid_empty_image_validation():
         validate_bitemporal_pair(img1, empty_img)
 
 
-# ── Test 10: Spatial dimension mismatch ──────────────────────────────
-def test_dimension_mismatch_validation():
-    img1 = make_test_raster(height=128, width=128)
-    img2 = make_test_raster(height=256, width=256)
+# ── Test 10: Automatic spatial dimension alignment (T1 437x275, T2 432x270) ──
+def test_exact_dimension_mismatch_437x275_and_432x270():
+    img1 = make_test_raster(height=275, width=437, color=(60, 60, 60))
+    img2 = make_test_raster(height=270, width=432, color=(180, 180, 180))
 
-    with pytest.raises(ChangeFormerError, match="Dimension mismatch for ChangeFormer analysis"):
-        validate_bitemporal_pair(img1, img2)
+    res = detect_changes_changeformer(img1, img2, query="Detect changes between T1 and T2")
+
+    assert res.status == "success"
+    assert res.mask is not None
+    assert res.mask.shape == (275, 437)
+    assert res.metadata["alignment_applied"] is True
+    assert res.metadata["aligned_from"] == "432x270"
+    assert res.metadata["aligned_to"] == "437x275"
+    assert "Secondary image automatically aligned from 432x270 to 437x275" in res.answer
+    assert any("432x270" in ev and "437x275" in ev for ev in res.evidence_sources)
+
+
+def test_matching_dimensions_no_alignment():
+    img1 = make_test_raster(height=128, width=128, color=(70, 70, 70))
+    img2 = make_test_raster(height=128, width=128, color=(170, 170, 170))
+
+    res = detect_changes_changeformer(img1, img2)
+
+    assert res.status == "success"
+    assert res.mask.shape == (128, 128)
+    assert res.metadata["alignment_applied"] is False
+    assert "Spatial alignment" not in res.answer
+
+
+def test_large_dimension_mismatch_alignment():
+    img1 = make_test_raster(height=256, width=512, color=(50, 80, 50))
+    img2 = make_test_raster(height=512, width=256, color=(150, 80, 50))
+
+    res = detect_changes_changeformer(img1, img2)
+
+    assert res.status == "success"
+    assert res.mask.shape == (256, 512)
+    assert res.metadata["alignment_applied"] is True
+    assert res.metadata["aligned_from"] == "256x512"
+    assert res.metadata["aligned_to"] == "512x256"
+
+
+def test_multispectral_dimension_alignment():
+    # 12-channel multispectral raster
+    arr1 = np.ones((100, 120, 12), dtype=np.float32) * 50.0
+    arr2 = np.ones((80, 90, 12), dtype=np.float32) * 150.0
+
+    bands = [f"B{i}" for i in range(12)]
+    r1 = RasterImage(data=arr1, bands=bands, sensor_type=SensorType.MULTISPECTRAL, width=120, height=100)
+    r2 = RasterImage(data=arr2, bands=bands, sensor_type=SensorType.MULTISPECTRAL, width=90, height=80)
+
+    from tools.changeformer_tool import align_and_validate_bitemporal_pair
+    _, aligned_r2, info = align_and_validate_bitemporal_pair(r1, r2)
+
+    assert info["aligned"] is True
+    assert aligned_r2.width == 120
+    assert aligned_r2.height == 100
+    assert aligned_r2.data.shape == (100, 120, 12)
+    assert aligned_r2.bands == bands
+
+
+def test_modality_mismatch_raises_error():
+    img_opt = make_test_raster(height=64, width=64, sensor_type=SensorType.RGB)
+    img_sar = make_test_raster(height=64, width=64, sensor_type=SensorType.SAR)
+
+    with pytest.raises(ChangeFormerError, match="Cannot compare SAR imagery with optical imagery"):
+        validate_bitemporal_pair(img_sar, img_opt)
+
+    with pytest.raises(ChangeFormerError, match="Cannot compare optical imagery with SAR imagery"):
+        validate_bitemporal_pair(img_opt, img_sar)
 
 
 # ── Test 11: Change detection tool wrapper ───────────────────────────

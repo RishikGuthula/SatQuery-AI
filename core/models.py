@@ -220,6 +220,55 @@ class RasterImage:
         normalized = np.clip((gray - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
         return normalized
 
+    def resize(self, target_width: int, target_height: int) -> RasterImage:
+        """
+        Resize raster to target spatial dimensions (target_width, target_height) using bilinear interpolation.
+        Preserves all channels/bands, sensor type, metadata, and float32 numerical precision.
+        """
+        if self.width == target_width and self.height == target_height:
+            return self
+
+        if self.data is None or self.data.size == 0:
+            raise ValueError("Cannot resize empty RasterImage.")
+
+        if target_width <= 0 or target_height <= 0:
+            raise ValueError(f"Target dimensions must be positive, got ({target_width}, {target_height}).")
+
+        orig_data = self.data
+        if orig_data.ndim == 2:
+            img_f = Image.fromarray(orig_data.astype(np.float32), mode="F")
+            resized_data = np.array(img_f.resize((target_width, target_height), Image.BILINEAR), dtype=np.float32)
+        elif orig_data.ndim == 3:
+            channels = orig_data.shape[2]
+            resized_channels = []
+            for c in range(channels):
+                band = orig_data[:, :, c].astype(np.float32)
+                img_f = Image.fromarray(band, mode="F")
+                resized_band = np.array(img_f.resize((target_width, target_height), Image.BILINEAR), dtype=np.float32)
+                resized_channels.append(resized_band)
+            resized_data = np.stack(resized_channels, axis=-1)
+        else:
+            raise ValueError(f"Unsupported array dimensions: {orig_data.ndim}")
+
+        new_metadata = dict(self.metadata)
+        new_metadata["aligned_from"] = (self.width, self.height)
+        new_metadata["aligned_to"] = (target_width, target_height)
+
+        return RasterImage(
+            data=resized_data,
+            bands=list(self.bands),
+            crs=self.crs,
+            transform=self.transform,
+            bounds=self.bounds,
+            resolution=self.resolution,
+            nodata=self.nodata,
+            dtype="float32",
+            sensor_type=self.sensor_type,
+            metadata=new_metadata,
+            width=target_width,
+            height=target_height,
+        )
+
     def to_pil(self) -> Image.Image:
         """Convert the raster's RGB representation to a PIL Image."""
         return Image.fromarray(self.to_rgb())

@@ -1,6 +1,6 @@
-﻿libjpeg-dev
+libjpeg-dev
 zlib1g-dev
 libfreetype6-dev
 liblcms2-dev
 libopenjp2-7-dev
-libtiff5-dev
+libtiff-dev

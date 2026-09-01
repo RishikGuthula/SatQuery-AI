@@ -14,7 +14,18 @@ logger = logging.getLogger(__name__)
 
 
 def _load_env_if_present():
-    """Load key-value pairs from .env file into os.environ if not already set."""
+    """Load key-value pairs from Streamlit secrets and .env file into os.environ."""
+    # 1. Load from Streamlit secrets if running in Streamlit Cloud / app
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets"):
+            for k, v in st.secrets.items():
+                if isinstance(v, str) and k not in os.environ:
+                    os.environ[k] = v
+    except Exception:
+        pass
+
+    # 2. Load from local .env files
     for env_path in (".env", "../.env", os.path.join(os.path.dirname(__file__), "..", ".env")):
         if os.path.exists(env_path):
             try:

@@ -35,7 +35,10 @@ class Intent(str, Enum):
     IMAGE_DESCRIPTION = "image_description"
     MULTI_FEATURE_ANALYSIS = "multi_feature_analysis"
     OPTICAL_SAR_ANALYSIS = "optical_sar_analysis"
+    OUT_OF_SCOPE = "out_of_scope"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
     UNSUPPORTED = "unsupported"
+
 
 
 
@@ -238,6 +241,14 @@ class AnalysisResult:
     metadata: dict = field(default_factory=dict)
     trace: AgentTrace | None = None
     session_context: SessionContext | None = None
+    status: str = "success"  # "success" | "out_of_scope" | "insufficient_evidence" | "error"
+    intent: str = ""
+    summary: str = ""
+    observations: list[str] = field(default_factory=list)
+    evidence_sources: list[str] = field(default_factory=list)
+    confidence_level: str = ""
+    sources: list[str] = field(default_factory=list)
+    structured_output: dict[str, Any] = field(default_factory=dict)
 
 
 # Standard band-name aliases for common satellite sensors

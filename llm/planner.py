@@ -31,9 +31,10 @@ class TaskItem(BaseModel):
 
 class ExecutionPlan(BaseModel):
     """Structured execution plan produced by the planner."""
+    status: str = Field(default="ready", description="'ready' | 'out_of_scope' | 'insufficient_evidence'")
     intent: str = Field(description="Overall intent category")
     reasoning: str = Field(description="Detailed plan rationale")
-    tasks: list[TaskItem] = Field(description="Ordered list of capability tasks to run")
+    tasks: list[TaskItem] = Field(default_factory=list, description="Ordered list of capability tasks to run")
     synthesis_required: bool = Field(default=True, description="Whether LLM synthesis is needed")
     planner_used: str = Field(default="llm", description="'llm' or 'deterministic'")
 
@@ -45,22 +46,29 @@ REGISTERED CAPABILITIES:
 {capabilities_prompt}
 
 RULES:
-1. ONLY select capability names from the list above. DO NOT invent arbitrary tool names.
-2. Multispectral vs RGB rules:
+1. DOMAIN VALIDATION (CRITICAL):
+   - SatQuery AI is strictly dedicated to satellite imagery, remote sensing, Earth observation, land cover/use, and geospatial data.
+   - If the user query is UNRELATED (e.g. "Who is the president of India?", "Write me a Python program", "What is the weather today?", "Tell me a joke", general trivia, coding, non-geospatial chat), classify it as OUT OF SCOPE:
+     Set "status": "out_of_scope", "intent": "out_of_scope", "tasks": [], "synthesis_required": false.
+     DO NOT invent satellite tasks or hallucinate context for unrelated queries.
+2. ONLY select capability names from the list above. DO NOT invent arbitrary tool names.
+3. Multispectral vs RGB rules:
    - For NDVI: Requires NIR and Red bands. If image is RGB only, use 'vegetation_detection' which provides an RGB greenness proxy with honest disclosures.
    - For NDWI: Requires Green and NIR bands. If image is RGB only, use 'water_detection' (RGB water proxy).
    - For NDBI: Requires SWIR and NIR bands. If image is RGB only, use 'builtup_detection' (RGB urban proxy).
-3. Visual Reasoning:
+4. Visual Reasoning:
    - If user asks for general description, scene analysis, feature identification, or explanation alongside a tool, include 'geochat' if available.
-4. Change Detection:
+5. Change Detection:
    - If user asks to compare/change detection between two images, use 'change_detection'.
-5. Multi-feature queries:
+   - If only one image is available, set "status": "insufficient_evidence", "intent": "change_detection", "tasks": [], "reasoning": "A second image is required for change detection."
+6. Multi-feature queries:
    - If user asks for multiple features (e.g., "find water and vegetation and explain the scene"), decompose into multiple tasks: ['water_detection', 'vegetation_detection', 'geochat'].
 
 OUTPUT FORMAT (JSON ONLY):
 {{
-  "intent": "water_detection" | "vegetation_detection" | "builtup_detection" | "change_detection" | "image_description" | "multi_feature_analysis" | "unsupported",
-  "reasoning": "Brief explanation of plan",
+  "status": "ready" | "out_of_scope" | "insufficient_evidence",
+  "intent": "water_detection" | "vegetation_detection" | "builtup_detection" | "change_detection" | "optical_sar_analysis" | "image_description" | "multi_feature_analysis" | "out_of_scope" | "insufficient_evidence" | "unsupported",
+  "reasoning": "Brief explanation of plan or reason for out_of_scope / insufficient_evidence",
   "tasks": [
     {{
       "capability": "capability_name",
@@ -138,6 +146,12 @@ IMAGE METADATA:
         data = json.loads(response.content)
         plan = ExecutionPlan.model_validate(data)
 
+        # Handle out_of_scope and insufficient_evidence directly
+        if plan.status in ("out_of_scope", "insufficient_evidence") or plan.intent == "out_of_scope":
+            plan.planner_used = "llm"
+            plan.synthesis_required = False
+            return plan
+
         # Validate that all planned tasks exist in registry
         valid_tasks = []
         for task in plan.tasks:
@@ -171,15 +185,23 @@ def _fallback_to_deterministic(
     intent = plan_res.intent
 
     tasks: list[TaskItem] = []
+    status = "ready"
 
-    if intent == Intent.WATER_DETECTION:
+    if intent == Intent.OUT_OF_SCOPE:
+        status = "out_of_scope"
+    elif intent == Intent.INSUFFICIENT_EVIDENCE:
+        status = "insufficient_evidence"
+    elif intent == Intent.WATER_DETECTION:
         tasks.append(TaskItem(capability="water_detection", reason="Deterministic keyword match for water"))
     elif intent == Intent.VEGETATION_DETECTION:
         tasks.append(TaskItem(capability="vegetation_detection", reason="Deterministic keyword match for vegetation"))
     elif intent == Intent.BUILTUP_DETECTION:
         tasks.append(TaskItem(capability="builtup_detection", reason="Deterministic keyword match for built-up"))
     elif intent == Intent.CHANGE_DETECTION:
-        tasks.append(TaskItem(capability="changeformer", reason="Bi-temporal change detection via ChangeFormer"))
+        if image2 is None:
+            status = "insufficient_evidence"
+        else:
+            tasks.append(TaskItem(capability="changeformer", reason="Bi-temporal change detection via ChangeFormer"))
     elif intent == Intent.IMAGE_DESCRIPTION:
         # Prefer GeoChat if registered & available, else image_description
         registry = get_registry()
@@ -193,8 +215,8 @@ def _fallback_to_deterministic(
     elif intent == Intent.UNSUPPORTED:
         tasks.append(TaskItem(capability="unsupported", reason=plan_res.reasoning))
 
-
     return ExecutionPlan(
+        status=status,
         intent=intent.value,
         reasoning=plan_res.reasoning,
         tasks=tasks,

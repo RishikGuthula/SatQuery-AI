@@ -22,7 +22,7 @@ from core.models import AnalysisResult, AgentTrace, SessionContext, Intent
 from core.planner import plan_query as deterministic_plan_query, PlanResult
 from core.registry import get_registry, ExecutionContext
 from llm.planner import plan_with_llm, ExecutionPlan, TaskItem
-from llm.synthesis import synthesize_results
+from llm.synthesis import synthesize_results, StructuredSynthesis
 from tools.registry import SINGLE_IMAGE_TOOLS
 from tools.changeformer_tool import detect_changes_changeformer, ChangeFormerError
 from vlm.client import get_vlm
@@ -82,6 +82,8 @@ def process_query(
             metadata={"error": str(e)},
             trace=trace,
             session_context=ctx,
+            status="error",
+            summary=f"Error loading primary image: {e}",
         )
 
     raster2 = None
@@ -108,6 +110,8 @@ def process_query(
                 metadata={"error": str(e)},
                 trace=trace,
                 session_context=ctx,
+                status="error",
+                summary=f"Error loading secondary image: {e}",
             )
 
     # --- Step 2: Plan Query ---
@@ -125,10 +129,85 @@ def process_query(
     trace.plan_reasoning = plan.reasoning
     trace.add_step(
         capability=f"planner ({plan.planner_used})",
-        status="success",
+        status="success" if plan.status != "out_of_scope" else "skipped",
         description=f"Planned intent '{plan.intent}' with {len(plan.tasks)} task(s): {plan.reasoning}",
         duration=plan_duration,
     )
+
+    # Check for early out-of-scope validation
+    if plan.status == "out_of_scope" or plan.intent == "out_of_scope":
+        elapsed = time.time() - t_start
+        trace.total_duration_seconds = round(elapsed, 3)
+        out_of_scope_msg = (
+            "🛰️ **SatQuery AI is designed for satellite imagery and Earth observation analysis.**\n\n"
+            "Your query appears to be unrelated to remote sensing or satellite analysis.\n\n"
+            "**Supported analysis includes:**\n"
+            "• Water detection & NDWI index (rivers, lakes, floods)\n"
+            "• Vegetation canopy & NDVI index (agriculture, forests)\n"
+            "• Built-up area detection & NDBI index (urban structures)\n"
+            "• Bi-temporal change detection (with two temporal images)\n"
+            "• Optical + SAR multi-modal classification (BIFOLD RDNet)\n"
+            "• Natural language visual reasoning (GeoChat-7B)\n\n"
+            "Please provide a question related to your satellite imagery."
+        )
+        return AnalysisResult(
+            answer=out_of_scope_msg,
+            evidence=None,
+            tool_used="domain_validator",
+            metadata={"query": query, "processing_time_seconds": round(elapsed, 3)},
+            trace=trace,
+            session_context=ctx,
+            status="out_of_scope",
+            intent="out_of_scope",
+            summary="Query is outside the scope of satellite and Earth observation analysis.",
+            observations=[],
+            evidence_sources=[],
+            confidence_level="Not Applicable",
+            sources=[],
+            structured_output={
+                "status": "out_of_scope",
+                "intent": "out_of_scope",
+                "summary": "Query is outside the scope of satellite and Earth observation analysis.",
+                "observations": [],
+                "evidence": [],
+                "confidence": "Not Applicable",
+                "sources": [],
+            },
+        )
+
+    # Check for early missing second image for change detection
+    if plan.status == "insufficient_evidence" and plan.intent == "change_detection" and raster2 is None:
+        elapsed = time.time() - t_start
+        trace.total_duration_seconds = round(elapsed, 3)
+        insufficient_msg = (
+            "⚠️ **Change detection requires two images.**\n\n"
+            "Please upload a second image (secondary/after image) to detect temporal land-cover changes.\n\n"
+            "Your query matched bi-temporal change detection, but only one image was provided."
+        )
+        return AnalysisResult(
+            answer=insufficient_msg,
+            evidence=None,
+            tool_used="change_detection (blocked)",
+            metadata={"reason": "missing_second_image", "processing_time_seconds": round(elapsed, 3)},
+            trace=trace,
+            session_context=ctx,
+            status="insufficient_evidence",
+            intent="change_detection",
+            summary="Change detection requires two temporal satellite images.",
+            observations=["A second image is required to calculate bi-temporal changes."],
+            evidence_sources=[f"Uploaded primary image ({raster1.width}x{raster1.height} px)"],
+            confidence_level="None — second image missing",
+            sources=["change_detection"],
+            structured_output={
+                "status": "insufficient_evidence",
+                "intent": "change_detection",
+                "summary": "Change detection requires two temporal satellite images.",
+                "observations": ["A second image is required to calculate bi-temporal changes."],
+                "evidence": [f"Uploaded primary image ({raster1.width}x{raster1.height} px)"],
+                "confidence": "None — second image missing",
+                "sources": ["change_detection"],
+            },
+        )
 
     # --- Step 3: Execute Planned Tasks ---
     registry = get_registry()
@@ -210,23 +289,22 @@ def process_query(
 
     # --- Step 4: Synthesize Final Answer ---
     t_synth = time.time()
-    if plan.synthesis_required and len(task_results) > 1:
-        final_answer = synthesize_results(
-            query=query,
-            plan=plan,
-            tool_results=task_results,
-            image1=raster1,
-            session_context=ctx,
-        )
-        synth_duration = time.time() - t_synth
-        trace.add_step(
-            capability="llm_synthesis",
-            status="success",
-            description="Synthesized multi-tool results into a grounded final answer.",
-            duration=synth_duration,
-        )
-    else:
-        final_answer = task_results[0].answer
+    synth: StructuredSynthesis = synthesize_results(
+        query=query,
+        plan=plan,
+        tool_results=task_results,
+        image1=raster1,
+        session_context=ctx,
+    )
+    synth_duration = time.time() - t_synth
+    trace.add_step(
+        capability="synthesis",
+        status="success",
+        description="Synthesized multi-tool results into a structured grounded answer.",
+        duration=synth_duration,
+    )
+
+    final_answer = synth.answer or synth.format_markdown()
 
     # --- Step 5: Consolidate Metadata & Session Context ---
     elapsed = time.time() - t_start
@@ -272,6 +350,14 @@ def process_query(
         metadata=consolidated_metadata,
         trace=trace,
         session_context=ctx,
+        status=synth.status,
+        intent=synth.intent or plan.intent,
+        summary=synth.summary,
+        observations=synth.observations,
+        evidence_sources=synth.evidence,
+        confidence_level=synth.confidence,
+        sources=synth.sources or [primary_tool_name],
+        structured_output=synth.model_dump(),
     )
 
     logger.info(f"Analysis completed in {elapsed:.3f}s. Primary tool: {final_result.tool_used}")
@@ -292,6 +378,16 @@ def _execute_legacy_fallback(
     except ValueError:
         intent = Intent.UNSUPPORTED
 
+    # Out of scope
+    if intent == Intent.OUT_OF_SCOPE:
+        from tools.registry import OutOfScopeCapability
+        return OutOfScopeCapability().execute(ExecutionContext(image1=raster1, query=plan.reasoning))
+
+    # Insufficient evidence
+    if intent == Intent.INSUFFICIENT_EVIDENCE:
+        from tools.registry import InsufficientEvidenceCapability
+        return InsufficientEvidenceCapability().execute(ExecutionContext(image1=raster1, query=plan.reasoning))
+
     # Change detection
     if intent == Intent.CHANGE_DETECTION:
         if raster2 is None:
@@ -301,6 +397,9 @@ def _execute_legacy_fallback(
                     "Please upload a second image and try again.\n\n"
                     f"Your query matched change detection, but only one image was provided."
                 ),
+                status="insufficient_evidence",
+                intent="change_detection",
+                summary="Change detection requires two images.",
                 tool_used="change_detection (blocked)",
                 metadata={"reason": "missing_second_image"},
             )
@@ -309,6 +408,7 @@ def _execute_legacy_fallback(
         except ChangeFormerError as e:
             return AnalysisResult(
                 answer=f"❌ Change detection failed: {e}",
+                status="error",
                 tool_used="changeformer (error)",
                 metadata={"error": str(e)},
             )
@@ -335,17 +435,20 @@ def _execute_legacy_fallback(
         except BIFOLDToolError as e:
             return AnalysisResult(
                 answer=f"❌ BIFOLD analysis failed: {e}",
+                status="error",
                 tool_used="bifold_rdnet (error)",
                 metadata={"error": str(e)},
             )
 
     # Image description
     if intent == Intent.IMAGE_DESCRIPTION:
-
         vlm = get_vlm()
         answer = vlm.analyze("", raster1)
         return AnalysisResult(
             answer=answer,
+            status="success",
+            intent="image_description",
+            summary=answer,
             tool_used="vlm_description",
             metadata={"method": "rule_based" if not vlm.is_available() else "vlm"},
         )
@@ -363,6 +466,9 @@ def _execute_legacy_fallback(
                 "- Change detection (requires two images)\n"
                 "- General image description\n"
             ),
+            status="insufficient_evidence",
+            intent="unsupported",
+            summary=f"Unsupported query: {plan.reasoning}",
             tool_used="unsupported_handler",
             metadata={"reason": plan.reasoning},
         )
@@ -381,6 +487,7 @@ def _execute_tool(
 ) -> AnalysisResult:
     """Backward compatibility helper for unit tests."""
     exec_plan = ExecutionPlan(
+        status="ready" if plan.intent != Intent.OUT_OF_SCOPE else "out_of_scope",
         intent=plan.intent.value,
         reasoning=plan.reasoning,
         tasks=[TaskItem(capability=plan.intent.value, reason=plan.reasoning)],

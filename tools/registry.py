@@ -105,11 +105,69 @@ class ImageDescriptionCapability(Capability):
         )
 
 
+class OutOfScopeCapability(Capability):
+    """Handler for out-of-scope non-geospatial queries."""
+
+    name = "out_of_scope"
+    description = "Handles queries unrelated to satellite imagery and Earth observation."
+    supported_inputs = ["single_image", "dual_image"]
+
+    def is_available(self) -> bool:
+        return True
+
+    def execute(self, context: ExecutionContext) -> AnalysisResult:
+        answer = (
+            "🛰️ **SatQuery AI is designed for satellite and Earth observation questions.**\n\n"
+            "Your query appears to be unrelated to remote sensing or satellite imagery.\n\n"
+            "**Supported topics include:**\n"
+            "• Water detection & NDWI index\n"
+            "• Vegetation canopy & NDVI index\n"
+            "• Built-up area detection & NDBI index\n"
+            "• Temporal change detection (with two images)\n"
+            "• Optical + SAR multi-modal classification (BIFOLD RDNet)\n"
+            "• Visual reasoning and scene description (GeoChat-7B)\n\n"
+            "Please enter a question about your satellite image."
+        )
+        return AnalysisResult(
+            answer=answer,
+            status="out_of_scope",
+            intent="out_of_scope",
+            summary="Query is outside the scope of satellite and Earth observation analysis.",
+            observations=[],
+            evidence_sources=[],
+            confidence_level="Not Applicable",
+            sources=[],
+            tool_used="domain_validator",
+            metadata={"query": context.query, "reason": "out_of_scope"},
+        )
+
+
+class InsufficientEvidenceCapability(Capability):
+    """Handler for queries where required evidence/images are missing."""
+
+    name = "insufficient_evidence"
+    description = "Handles queries lacking necessary input data or secondary imagery."
+    supported_inputs = ["single_image", "dual_image"]
+
+    def is_available(self) -> bool:
+        return True
+
+    def execute(self, context: ExecutionContext) -> AnalysisResult:
+        return AnalysisResult(
+            answer="⚠️ The available data is insufficient to answer this query. Please provide the required imagery or spectral bands.",
+            status="insufficient_evidence",
+            intent="insufficient_evidence",
+            summary="Available evidence is insufficient.",
+            tool_used="evidence_validator",
+            metadata={"query": context.query},
+        )
+
+
 class UnsupportedCapability(Capability):
-    """Handler for unsupported or out-of-scope queries."""
+    """Handler for unsupported remote-sensing queries."""
 
     name = "unsupported"
-    description = "Handles queries outside the scope of remote-sensing analysis."
+    description = "Handles queries outside the current scope of remote-sensing tools."
     supported_inputs = ["single_image", "dual_image"]
 
     def is_available(self) -> bool:
@@ -128,6 +186,9 @@ class UnsupportedCapability(Capability):
                 "- Multi-modal Optical + SAR land-cover classification via BIFOLD RDNet Base\n"
                 "- Remote visual interpretation via GeoChat-7B\n"
             ),
+            status="insufficient_evidence",
+            intent="unsupported",
+            summary="Query is not currently supported by registered remote-sensing tools.",
             tool_used="unsupported_handler",
             metadata={"query": context.query},
         )
@@ -234,7 +295,10 @@ def register_all_capabilities() -> None:
     # AI Models & Descriptions
     reg.register(GeoChatCapability())
     reg.register(ImageDescriptionCapability())
+    reg.register(OutOfScopeCapability())
+    reg.register(InsufficientEvidenceCapability())
     reg.register(UnsupportedCapability())
+
 
 
 # Automatically register on module import

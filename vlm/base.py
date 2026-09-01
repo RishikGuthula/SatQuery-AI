@@ -1,14 +1,12 @@
 """
-Vision-Language Model abstraction.
-
-Defines the interface for integrating a VLM (e.g., GPT-4V, LLaVA, etc.).
-Currently provides a rule-based fallback that does NOT claim to be AI reasoning.
+Vision-Language Model abstraction for SatQuery AI.
 """
 
 from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from typing import Any
 
 from core.models import AnalysisResult, RasterImage
 
@@ -16,17 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class VisionLanguageModel(ABC):
-    """
-    Abstract interface for a vision-language model.
-
-    When a real VLM is available, implement this interface.
-    The VLM is responsible for:
-      - Query understanding
-      - Natural language explanation of results
-      - Contextual interpretation
-
-    It must NOT fabricate numerical remote-sensing measurements.
-    """
+    """Abstract interface for a vision-language model backend."""
 
     @abstractmethod
     def analyze(
@@ -34,63 +22,44 @@ class VisionLanguageModel(ABC):
         query: str,
         image: RasterImage,
         analysis_result: AnalysisResult | None = None,
+        context: dict[str, Any] | None = None,
     ) -> str:
         """
-        Generate a natural language explanation for an analysis result.
-
-        Args:
-            query: The user's original query.
-            image: The input image.
-            analysis_result: Optional result from a spectral tool.
-
-        Returns:
-            Natural language string explaining the result.
+        Perform multimodal visual reasoning on the image and query.
         """
         ...
 
     @abstractmethod
     def is_available(self) -> bool:
-        """Return True if a real VLM is configured and operational."""
+        """Return True if the VLM service is configured and reachable."""
         ...
+
+    def health_check(self) -> dict[str, Any]:
+        """Check the health of the VLM backend."""
+        return {"available": self.is_available()}
 
 
 class RuleBasedVLM(VisionLanguageModel):
-    """
-    Rule-based fallback when no real VLM is available.
-
-    Does NOT pretend to be AI. Clearly labels itself as rule-based.
-    """
+    """Rule-based fallback when no remote VLM is available."""
 
     def analyze(
         self,
         query: str,
         image: RasterImage,
         analysis_result: AnalysisResult | None = None,
+        context: dict[str, Any] | None = None,
     ) -> str:
         if analysis_result is not None:
-            # The tool already produced a good answer; pass it through.
             return analysis_result.answer
 
-        # For image description / unsupported queries
         return (
-            f"[Rule-based baseline — no VLM configured]\n\n"
-            f"Image info: {image.width}x{image.height} pixels, "
-            f"{image.num_bands} band(s), "
+            f"[Visual Baseline — GeoChat VLM Offline / Not Configured]\n\n"
+            f"Image properties: {image.width}x{image.height} px, "
+            f"{image.num_bands} band(s) ({', '.join(image.bands)}), "
             f"sensor type: {image.sensor_type.value}.\n\n"
-            f"To enable AI-powered analysis, configure a Vision-Language Model "
-            f"(e.g., GPT-4V, LLaVA, or similar) by implementing the "
-            f"VisionLanguageModel interface in vlm/base.py."
+            f"ℹ️ For detailed visual AI interpretation, connect the remote "
+            f"GeoChat-7B GPU inference service via GEOCHAT_API_URL."
         )
 
     def is_available(self) -> bool:
         return False
-
-
-def get_vlm() -> VisionLanguageModel:
-    """
-    Return the configured VLM instance.
-
-    Currently returns the rule-based fallback.
-    Replace this to plug in a real VLM.
-    """
-    return RuleBasedVLM()

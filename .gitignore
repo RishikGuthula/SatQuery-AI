@@ -1,20 +1,48 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.DS_Store
+
+# Environments
 .venv/
 venv/
+env/
+ENV/
+
+# Environment Variables & Secrets
 .env
-.env.*
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Test & Coverage
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+.tox/
 .coverage
+htmlcov/
+
+# Build & Packaging
 *.egg-info/
 dist/
 build/
 .eggs/
 *.egg
-.ruff_cache/
-.tox/
-.mypy_cache/
-*.so
-.DS_Store
+
+# Model weights & large data (DO NOT COMMIT)
+*.bin
+*.pt
+*.pth
+*.safetensors
+*.onnx
+*.h5
+*.ckpt
+checkpoints/
+models/checkpoints/
+geochat_weights/
+data/
+sample_data/

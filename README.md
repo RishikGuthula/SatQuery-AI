@@ -1,224 +1,148 @@
 # 🛰️ SatQuery AI
 
-**Multimodal Remote-Sensing Assistant for Satellite Image Analysis**
+**Single Agentic Multimodal Remote-Sensing Assistant**
 
-SatQuery AI is an interactive tool that analyzes satellite imagery using spectral indices (NDVI, NDWI, NDBI), change detection, and visual heuristics. It provides clear, honest analysis with visual evidence maps.
+SatQuery AI is an agentic satellite imagery assistant that automatically understands natural language questions, plans multi-step remote-sensing tasks, invokes authoritative scientific tools (NDVI, NDWI, NDBI, Change Detection) and remote GPU-hosted vision-language models (GeoChat-7B), and synthesizes grounded answers with visual evidence overlay maps.
 
 ---
 
-## Problem
-
-Remote-sensing analysis traditionally requires specialized GIS software and expertise. Satellite imagery interpretation is complex, and many tools either oversimplify results or fabricate confidence metrics. SatQuery AI addresses this by providing **scientifically honest** analysis tools with clear separation between true spectral calculations and RGB-based visual heuristics.
-
-## Solution
-
-SatQuery AI uses a modular architecture:
-
-1. **Query Planner** — Routes user queries to the appropriate analysis tool
-2. **Spectral Tools** — Compute real NDVI/NDWI/NDBI when multispectral bands are available
-3. **Change Detection** — Compares two images to detect land-cover changes
-4. **Evidence Engine** — Generates clear visual overlays showing what was detected
-5. **VLM Interface** — Abstract interface for future Vision-Language Model integration
+## 🎯 Architecture Overview
 
 ```
-┌──────────────────┐
-│   Streamlit UI   │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Query Planner   │  ← Intent classification
-└────────┬─────────┘
-         │
-    ┌────┼────────────┐
-    ▼    ▼            ▼
-  Water  Veg.    Change
-  (NDWI) (NDVI)  Detection
-    │    │            │
-    └────┼────────────┘
-         │
-         ▼
-┌──────────────────┐
-│ Evidence Engine  │  ← Visual overlay
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│ Analysis Result  │
-└──────────────────┘
+                                 USER
+                                  │
+                                  ▼
+                           STREAMLIT UI
+                      (Uploads + Chat + Trace)
+                                  │
+                                  ▼
+                      SATQUERY UNIFIED AGENT
+                      (agent/controller.py)
+                                  │
+                                  ▼
+                      LLM PLANNER / ROUTER
+                  (llm/planner.py & core/planner.py)
+                      (Strict Pydantic JSON Plan)
+                                  │
+                                  ▼
+                         CAPABILITY REGISTRY
+                         (core/registry.py)
+                                  │
+        ┌─────────────────────────┼─────────────────────────┐
+        ▼                         ▼                         ▼
+   GeoChat-7B API         Scientific Tools           Future Models
+  (vlm/geochat.py)    (NDVI, NDWI, NDBI, Change)   (SAR, Seg, Objects)
+        │                         │                         │
+   [Colab GPU]                    │                         │
+        └─────────────────────────┼─────────────────────────┘
+                                  │
+                                  ▼
+                           EVIDENCE ENGINE
+                        (evidence/engine.py)
+                                  │
+                                  ▼
+                            LLM SYNTHESIS
+                         (llm/synthesis.py)
+                                  │
+                                  ▼
+                          ONE FINAL ANSWER
+                      (Answer + Evidence Map +
+                       Transparency Trace)
 ```
 
-## Features
+---
 
-### ✅ Implemented
-- **Water detection** — True NDWI (McFeeters 1996) for multispectral, RGB color proxy for standard images
-- **Vegetation detection** — True NDVI (Rouse et al. 1974) for multispectral, greenness proxy for RGB
-- **Built-up detection** — True NDBI (Zha et al. 2003) for multispectral, urban color proxy for RGB
-- **Change detection** — Pixel-difference pipeline for image pairs
-- **Visual evidence maps** — Clear overlay showing detected areas
-- **Multispectral GeoTIFF support** — Full raster loading with band metadata
-- **Honest reporting** — Clearly labels heuristics vs. true spectral calculations
+## ✨ Key Features
 
-### 🔬 Experimental
-- **RGB visual proxies** — Color-based approximations (NOT equivalent to true indices)
-- **Image pair alignment** — Basic resize-based alignment for different-resolution images
+1. **Single Unified Agent Workflow**: The user uploads imagery and asks natural language questions without manually choosing tools or models.
+2. **Authoritative Scientific Tools**:
+   - **Vegetation**: True NDVI $(\frac{\text{NIR}-\text{Red}}{\text{NIR}+\text{Red}})$ Rouse et al. 1974
+   - **Water**: True NDWI $(\frac{\text{Green}-\text{NIR}}{\text{Green}+\text{NIR}})$ McFeeters 1996
+   - **Built-up**: True NDBI $(\frac{\text{SWIR}-\text{NIR}}{\text{SWIR}+\text{NIR}})$ Zha et al. 2003
+   - **Change Detection**: Normalized color-space Euclidean difference mapping with adaptive thresholding and geospatial reprojection.
+3. **Remote GPU GeoChat-7B Integration**: Dedicated authenticated HTTPS API running GeoChat-7B on Google Colab GPU (or dedicated GPU VMs) using 504x504 image tensors. The main app remains lightweight with zero in-app PyTorch/CUDA dependencies.
+4. **Online LLM Planning & Synthesis**: OpenAI and Google Gemini provider abstractions for intent classification, task decomposition, and grounded result synthesis without metric hallucinations.
+5. **Resilient Fallback Hierarchy**: If online LLM or remote GeoChat GPU are offline, the system automatically falls back to deterministic rule-based planning and local scientific tools without crashing.
+6. **Execution Trace Transparency**: Interactive "How the agent solved this" UI expander displaying step-by-step reasoning, tool execution status, timing, and sensor metadata.
 
-### 🗺️ Planned
-- **Vision-Language Model integration** — GPT-4V, LLaVA, or similar for natural language understanding
-- **SAR support** — Synthetic Aperture Radar analysis
-- **Temporal analysis** — Multi-date time series
-- **Advanced registration** — Affine/projective image registration
-- **Object detection** — Building/road/vehicle detection
+---
 
-## Supported Inputs
+## 🚀 Quickstart
 
-| Input Type | Bands Required | Analysis Supported |
-|------------|---------------|-------------------|
-| RGB (PNG, JPEG) | Red, Green, Blue | Visual proxies only (clearly labeled) |
-| GeoTIFF (multispectral) | NIR + Red (NDVI), Green + NIR (NDWI), SWIR + NIR (NDBI) | True spectral indices |
-| Sentinel-2 / Landsat | All bands | Full analysis |
-| SAR | — | Detected but not yet analyzed |
-
-## Installation
+### 1. Installation
 
 ```bash
 # Clone repository
 git clone https://github.com/RishikGuthula/SatQuery-AI.git
 cd SatQuery-AI
 
-# Create virtual environment (recommended)
+# Create virtual environment
 python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# .venv\Scripts\activate   # Windows
+source .venv/bin/activate  # Linux/Mac (.venv\Scripts\activate on Windows)
 
-# Install dependencies
+# Install lightweight dependencies
 pip install -r requirements.txt
+```
 
-# Run the application
+### 2. Configure Environment Variables (Optional)
+
+Copy `.env.example` to `.env`:
+
+```bash
+cp .env.example .env
+```
+
+```ini
+# Online LLM (OpenAI or Gemini)
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o-mini
+LLM_API_KEY=your-api-key
+
+# GeoChat-7B Remote GPU Backend (Google Colab / Dedicated Server)
+GEOCHAT_ENABLED=true
+GEOCHAT_API_URL=https://your-colab-tunnel.trycloudflare.com
+GEOCHAT_API_KEY=your-secret-key
+GEOCHAT_TIMEOUT=120
+```
+
+> **Note**: If `.env` is left empty, SatQuery runs in **Deterministic Offline Mode** using local scientific tools and rule-based planning.
+
+### 3. Run Application
+
+```bash
 streamlit run app.py
 ```
 
-## Usage
+Visit `http://localhost:8501` in your browser.
 
-### Example Queries
+---
 
-**Single image analysis:**
-- "Find water bodies in this image"
-- "Detect vegetation areas"
-- "Show built-up areas"
-- "Calculate NDVI"
-- "Describe this image"
+## 🛰️ Google Colab GPU Setup for GeoChat-7B
 
-**Change detection (requires two images):**
-- "Detect changes between the two images"
-- "Compare these images"
+For step-by-step copy-paste commands to launch the standalone GeoChat-7B inference server on a free or Pro Google Colab GPU runtime, see [docs/geochat-colab.md](docs/geochat-colab.md).
 
-### Understanding Results
+---
 
-**True spectral index** (multispectral input):
-```
-Water detection using NDWI (McFeeters 1996).
-Water coverage: 17.4% of image area (12,345 of 71,000 pixels).
-Threshold: > 0.00
-Method: True spectral index using Green and NIR bands.
-```
+## 🧪 Running Tests
 
-**RGB heuristic** (standard image):
-```
-Water detection using RGB color heuristic (visual proxy).
-Estimated water-like area: 15.2% of image area.
-⚠️ This is NOT a true NDWI calculation. True NDWI requires
-near-infrared (NIR) spectral data.
-```
-
-## Project Structure
-
-```
-SatQuery-AI/
-├── app.py                    # Streamlit application
-├── agent/
-│   ├── __init__.py
-│   └── controller.py         # Main pipeline orchestrator
-├── core/
-│   ├── __init__.py
-│   ├── models.py             # RasterImage, AnalysisResult, Intent
-│   ├── planner.py            # Query router / intent classifier
-│   └── image_loader.py       # Unified image loading (PIL + rasterio)
-├── tools/
-│   ├── __init__.py
-│   ├── registry.py           # Tool registry
-│   ├── spectral.py           # Spectral index calculations
-│   ├── water_detection.py    # Water detection tool
-│   ├── vegetation_detection.py
-│   ├── builtup_detection.py
-│   └── change_detection.py   # Change detection pipeline
-├── evidence/
-│   ├── __init__.py
-│   └── engine.py             # Visual evidence generation
-├── vlm/
-│   ├── __init__.py
-│   └── base.py               # VLM abstraction (for future integration)
-├── tests/
-│   ├── test_router.py
-│   ├── test_spectral.py
-│   ├── test_change_detection.py
-│   ├── test_image_loader.py
-│   └── test_controller.py
-├── .github/workflows/ci.yml  # CI pipeline
-├── requirements.txt
-└── README.md
-```
-
-## Architecture Principles
-
-1. **AI decides WHAT** — The query planner determines intent
-2. **Tools decide HOW** — Spectral tools perform the actual calculation
-3. **Evidence shows WHERE** — The evidence engine visualizes results
-4. **Honest reporting** — No fabricated confidence, no fake NDVI for RGB
-
-## Limitations
-
-- **RGB images** cannot be used for true NDVI/NDWI/NDBI (requires NIR/SWIR bands)
-- **Change detection** uses simple pixel-difference (not advanced temporal analysis)
-- **No SAR analysis** currently (SAR inputs are detected but not processed)
-- **Image alignment** is basic (resize to match dimensions, not true georegistration)
-- **No real VLM** currently integrated (interface is ready for future implementation)
-- RGB "proxies" are **visual heuristics only** and should not be used for scientific analysis
-
-## Evaluation Metrics
-
-When multispectral data is available:
-- **Coverage percentage** — Fraction of image classified as target class
-- **Index statistics** — Mean, min, max of the computed index
-- **Mask quality** — Binary classification at standard thresholds
-
-For RGB inputs, these metrics reflect the heuristic approximation and are not scientifically validated.
-
-## Roadmap
-
-- [ ] Integrate VLM (GPT-4V / LLaVA) for natural language queries
-- [ ] Add SAR analysis (sigma0 backscatter, speckle filtering)
-- [ ] Implement advanced image registration for change detection
-- [ ] Add multi-temporal analysis
-- [ ] Support for custom band configurations
-- [ ] Export results as GeoTIFF / Shapefile
-- [ ] Batch processing for large areas
-
-## Running Tests
+SatQuery includes a comprehensive test suite covering capability registration, LLM planning, GeoChat client mocking, synthesis grounding, session context, security limits, and remote sensing formulas:
 
 ```bash
-# Run all tests
-pytest tests/ -v
-
-# Run specific test module
-pytest tests/test_spectral.py -v
-pytest tests/test_controller.py -v
+source .venv/bin/activate
+pytest -v
 ```
 
-## License
+---
 
-This project was developed for educational/hackathon purposes.
+## 🔒 Security & Scientific Integrity
 
-## Credits
+* **Zero Credential Leaks**: API keys are passed exclusively via environment variables and never logged or committed.
+* **No Arbitrary Code Execution**: The agent only executes valid, pre-registered capabilities in `core/registry.py`.
+* **Honest Remote Sensing Disclosures**: RGB proxy heuristics are strictly labeled and never claimed to be true multispectral satellite calculations.
+* **Bounded File Limits**: Enforces `MAX_FILE_SIZE` and `MAX_DIMENSION` guards against memory exhaustion.
 
-Developed by the SatQuery AI team. Built with Streamlit, NumPy, Pillow, and Rasterio.
+---
+
+## 📄 License
+
+MIT License. See `LICENSE` for details.

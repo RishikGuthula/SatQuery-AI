@@ -15,7 +15,6 @@ import time
 from typing import Any
 
 import requests
-from PIL import Image
 
 from core.models import AnalysisResult, RasterImage
 from vlm.base import VisionLanguageModel

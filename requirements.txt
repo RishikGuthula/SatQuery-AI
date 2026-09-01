@@ -13,6 +13,8 @@ torchvision
 transformers
 accelerate
 peft
+timm
+safetensors
 rich>=10.14.0
 
 # Online LLM Clients (NVIDIA NIM / OpenAI-compatible API)
@@ -20,4 +22,3 @@ openai>=1.0.0
 
 # Development & Testing
 pytest>=7.0.0,<9.0.0
-

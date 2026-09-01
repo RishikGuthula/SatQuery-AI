@@ -157,9 +157,9 @@ def synthesize_results(
 
     client = llm_client or get_llm_client()
 
-    # If only one tool was run and synthesis is not strictly required or LLM is offline,
-    # generate structured synthesis from the tool's result directly
-    if not client.is_available or (len(tool_results) == 1 and not plan.synthesis_required):
+    # If synthesis is not required by the plan or LLM is offline,
+    # generate structured synthesis from tool result(s) directly
+    if not client.is_available or not plan.synthesis_required:
         return _fallback_rule_based_synthesis(query, plan, tool_results, image1)
 
     # Format tool outputs and ground-truth metrics for the synthesizer

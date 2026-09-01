@@ -205,7 +205,7 @@ def register_all_capabilities() -> None:
             description="Detects water bodies. Computes true NDWI (Green+NIR) or RGB water proxy.",
             fn=detect_water,
             supported_inputs=["single_image"],
-            required_bands=["green", "nir"],
+            required_bands=[],
         )
     )
     reg.register(
@@ -214,7 +214,7 @@ def register_all_capabilities() -> None:
             description="Detects vegetation and green canopy. Computes true NDVI (NIR+Red) or RGB greenness proxy.",
             fn=detect_vegetation,
             supported_inputs=["single_image"],
-            required_bands=["nir", "red"],
+            required_bands=[],
         )
     )
     reg.register(
@@ -223,7 +223,7 @@ def register_all_capabilities() -> None:
             description="Detects urban and built-up areas. Computes true NDBI (SWIR+NIR) or RGB urban proxy.",
             fn=detect_builtup,
             supported_inputs=["single_image"],
-            required_bands=["swir1", "nir"],
+            required_bands=[],
         )
     )
     reg.register(

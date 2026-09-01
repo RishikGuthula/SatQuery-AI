@@ -219,7 +219,7 @@ def _build_result(
                 if method == "true_ndvi"
                 else RGB_GREENNESS_THRESHOLD
             ),
-            "requires_multispectral": method != "true_ndvi",
+            "requires_multispectral": method == "true_ndvi",
         },
     )
 

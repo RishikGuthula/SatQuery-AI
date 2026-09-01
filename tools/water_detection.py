@@ -223,7 +223,7 @@ def _build_result(
                 if method == "true_ndwi"
                 else RGB_WATER_THRESHOLD
             ),
-            "requires_multispectral": method != "true_ndwi",
+            "requires_multispectral": method == "true_ndwi",
         },
     )
 

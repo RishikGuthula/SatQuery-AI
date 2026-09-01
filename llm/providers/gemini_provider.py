@@ -5,6 +5,8 @@ Google Gemini LLM provider implementation using REST API.
 from __future__ import annotations
 
 import logging
+from typing import Any
+
 import requests
 
 from llm.base import LLMProvider, LLMMessage, LLMResponse

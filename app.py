@@ -440,6 +440,9 @@ if st.session_state.last_result is not None:
 
     # 2. Key Observations & Evidence Grid
     obs_list = getattr(result, "observations", [])
+    feat_list = getattr(result, "key_visual_features", [])
+    interpretation_text = getattr(result, "interpretation", "")
+    limitations_list = getattr(result, "limitations", [])
     ev_list = getattr(result, "evidence_sources", []) or getattr(result, "evidence", [])
     if isinstance(ev_list, list) and ev_list and isinstance(ev_list[0], str):
         evidence_items = ev_list
@@ -455,7 +458,19 @@ if st.session_state.last_result is not None:
             st.markdown("#### 🔍 Key Observations")
             for obs in obs_list:
                 st.markdown(f'<div class="sat-observation-item">• {obs}</div>', unsafe_allow_html=True)
-        elif result.answer and not summary_text:
+
+        if feat_list:
+            st.markdown("<div style='height: 6px;'></div>", unsafe_allow_html=True)
+            st.markdown("#### 🗺️ Visual Features & Land Cover")
+            for feat in feat_list:
+                st.markdown(f'<div class="sat-observation-item">• {feat}</div>', unsafe_allow_html=True)
+
+        if interpretation_text:
+            st.markdown("<div style='height: 6px;'></div>", unsafe_allow_html=True)
+            st.markdown("#### 💡 Interpretation & Analysis")
+            st.markdown(f'<div style="color: #cbd5e1; font-size: 0.95rem; line-height: 1.5;">{interpretation_text}</div>', unsafe_allow_html=True)
+
+        if not obs_list and not feat_list and result.answer and not summary_text:
             st.markdown(result.answer)
 
     with rcol2:
@@ -471,6 +486,12 @@ if st.session_state.last_result is not None:
         st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
         st.markdown(f"**Confidence Rating:**")
         st.markdown(f'<div class="sat-confidence-pill">{conf_text}</div>', unsafe_allow_html=True)
+
+        if limitations_list:
+            st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+            st.markdown("#### ⚠️ Limitations & Disclosures")
+            for lim in limitations_list:
+                st.markdown(f'<div style="color: #94a3b8; font-size: 0.85rem; margin-bottom: 4px;">⚠️ {lim}</div>', unsafe_allow_html=True)
 
     # 3. Visual Evidence Map Display
     if result.evidence is not None:

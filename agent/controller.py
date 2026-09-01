@@ -354,8 +354,11 @@ def process_query(
         intent=synth.intent or plan.intent,
         summary=synth.summary,
         observations=synth.observations,
+        key_visual_features=synth.key_visual_features,
+        interpretation=synth.interpretation,
         evidence_sources=synth.evidence,
         confidence_level=synth.confidence,
+        limitations=synth.limitations,
         sources=synth.sources or [primary_tool_name],
         structured_output=synth.model_dump(),
     )

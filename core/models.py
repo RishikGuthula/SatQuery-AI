@@ -294,8 +294,11 @@ class AnalysisResult:
     intent: str = ""
     summary: str = ""
     observations: list[str] = field(default_factory=list)
+    key_visual_features: list[str] = field(default_factory=list)
+    interpretation: str = ""
     evidence_sources: list[str] = field(default_factory=list)
     confidence_level: str = ""
+    limitations: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
     structured_output: dict[str, Any] = field(default_factory=dict)
 
